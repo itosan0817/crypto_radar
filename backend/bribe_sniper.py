@@ -14,8 +14,8 @@ import os
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from web3 import AsyncWeb3
-from web3.providers import WebSocketProvider, HTTPProvider
+from web3 import AsyncWeb3, AsyncHTTPProvider
+from web3.providers import WebSocketProvider
 
 from sniper.config import ALCHEMY_BASE_WSS_URL, ALCHEMY_BASE_HTTP_URL
 from sniper.event_monitor import start_bribe_monitor
@@ -58,7 +58,7 @@ async def main_loop() -> None:
     # ──────────────────────────────────────────
     # HTTP Provider（ポジション価格ポーリング用）
     # ──────────────────────────────────────────
-    w3_http = AsyncWeb3(HTTPProvider(ALCHEMY_BASE_HTTP_URL))
+    w3_http = AsyncWeb3(AsyncHTTPProvider(ALCHEMY_BASE_HTTP_URL))
 
     # ──────────────────────────────────────────
     # PositionManager の生成（HTTPで価格を取得）
