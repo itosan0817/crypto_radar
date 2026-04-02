@@ -28,7 +28,7 @@ ALCHEMY_BASE_HTTP_URL = os.getenv(
 # Discord の Webhook URL
 DISCORD_WEBHOOK_URL = os.getenv(
     "DISCORD_WEBHOOK_URL",
-    "https://discord.com/api/webhooks/1486024387235807363/5uOvGnnf61kMLboYSKJwYbnHgohr3ebaTna1e4fqdaDrQVGxrnTx49ucZFt0xam1x2K8"
+    "https://discord.com/api/webhooks/1489222489207996571/VJiupsBzmet54AZTscv_6NiUVuun92tALLOUZUVOEvOjaZAW7KI80LkFAYUWGs1d3UtG"
 )
 
 # ==========================================
@@ -36,7 +36,7 @@ DISCORD_WEBHOOK_URL = os.getenv(
 # ==========================================
 AERODROME_VOTER_ADDRESS     = "0x16613524e02ad97eDfeF371bC883F2F5d6C480A5"
 # WETH/USDC基準プール（WETH価格の取得用。Aerodromeの主要プールから確認すること）
-WETH_USDC_REF_POOL_ADDRESS  = "0x88B49842AC7C35b25F490Ef5763a9A4AB3DAF5A0"
+WETH_USDC_REF_POOL_ADDRESS  = "0xcDAc0d6c6C59727a65f871236188350531885C43"
 
 # ==========================================
 # ✅ 有効な報酬トークン ホワイトリスト (Base Chain)
