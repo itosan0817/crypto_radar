@@ -283,3 +283,23 @@ async def notify_rejected(pool_name: str, bribe_token: str, reason: str) -> None
         "timestamp": now_utc.isoformat(),
     }
     await _send_embed(embed)
+
+
+# ────────────────────────────────────────────────────────
+# 🚨 エラー（プログラム異常）通知
+# ────────────────────────────────────────────────────────
+async def notify_error(process_name: str, error_msg: str) -> None:
+    """プログラム異常発生時（例外）の通知をDiscordへ送信する"""
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    
+    # 2000文字の制限に引っかからないようにログを切り詰め
+    safe_error_msg = error_msg[:2000]
+    
+    embed = {
+        "title": f"🚨 [SYSTEM ERROR] {process_name} 異常発生",
+        "description": f"プログラムの実行中に警告・致命的なエラーが発生しました。\n```python\n{safe_error_msg}\n```",
+        "color": COLOR_HARD_STOP,
+        "footer": {"text": f"発生時刻: {_fmt_jst(now_utc)} | Bribe Sniper SIM"},
+        "timestamp": now_utc.isoformat(),
+    }
+    await _send_embed(embed)

@@ -1,0 +1,27 @@
+接続状態: True
+最新ブロック: 44171184
+
+=== Voter: 現在の設定 (0x16613524e02ad97eDfeF371bC883F2F5d6C480A5) ===
+  ⚠️ ERROR  USDC: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  WETH: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  AERO: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  cbBTC: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  wstETH: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  cbETH: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  DEGEN: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  WELL: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  SNX: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  LINK: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+
+=== Voter: Aerodrome v2 Voter (公式ドキュメント) (0x16613524e02ad97eDfeF371bC883F2F5d6C480A5) ===
+  ⚠️ ERROR  USDC: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  WETH: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  AERO: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  cbBTC: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  wstETH: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  cbETH: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  DEGEN: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  WELL: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  SNX: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+  ⚠️ ERROR  LINK: ("The function 'isWhitelistedToken' was not found in this ", "contract's abi.")
+

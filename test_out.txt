@@ -1,0 +1,10 @@
+🚀 [TEST] Bribe Sniper 疑似イベント・シナリオテストを開始します...
+
+🧪 STEP 1: WETH/USDC への USDC Bribe 入金検知テスト...
+   入金トークン: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+   Bribeコントラクト: 0x78d1cEfD2cc5975d9E5Bb10f63eAeb3b8647000d
+  📊 スコア=40/100 グレード=N/A NetEV=+0.0JST 有効=False
+  ⛔ エントリー棄却: スコア不足 (40 < 50)
+
+✅ [TEST] シナリオ投入完了。
+📱 Discordのアラートと、Firestoreの 'bribe_positions' コレクションを確認してください。

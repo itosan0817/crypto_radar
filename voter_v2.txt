@@ -1,0 +1,13 @@
+接続状態: True
+
+=== ABI variant1 (name=token) ===
+  USDC: True
+  WETH: True
+
+=== ABI variant2 (name='') ===
+  USDC: True
+  WETH: True
+
+=== 直接 eth_call (function selector) ===
+  USDC isWhitelistedToken = True
+  WETH isWhitelistedToken = True

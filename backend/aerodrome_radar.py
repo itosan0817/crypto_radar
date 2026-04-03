@@ -89,7 +89,18 @@ async def main_loop():
                 await subscribe_and_listen(w3)
                 
         except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
             print(f"❌ WebSocket切断または致命的エラー: {e}", flush=True)
+            
+            error_str = str(e)
+            if "no close frame received or sent" not in error_str and "Connection closed" not in error_str:
+                try:
+                    from services.discord_service import DiscordService
+                    DiscordService.send_error_notification("Aerodrome Radar (Main Loop)", error_trace)
+                except Exception as notify_e:
+                    print(f"❌ エラー通知送信失敗: {notify_e}", flush=True)
+
             print("🔄 5秒後に無限再接続ループを発動します...", flush=True)
             await asyncio.sleep(5)
 
@@ -98,3 +109,12 @@ if __name__ == "__main__":
         asyncio.run(main_loop())
     except KeyboardInterrupt:
         print("\n👋 監視レーダー・極 を終了します。", flush=True)
+    except Exception as fatal_e:
+        import traceback
+        error_trace = traceback.format_exc()
+        try:
+            from services.discord_service import DiscordService
+            DiscordService.send_error_notification("Aerodrome Radar (Fatal Crash)", error_trace)
+        except Exception:
+            pass
+        raise

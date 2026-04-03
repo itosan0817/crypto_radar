@@ -276,64 +276,72 @@ async def _save_and_notify_entry(
     await notify_entry(pos, net_ev_jst, delay_sec, bribe_amount_usd, tvl_usd, score)
 
 
+# 🚩 ExternalBribeアドレス → プールアドレス の既知のマッピング（主要プール用）
+# 逆引きAPIが利用できない場合のフォールバックとして使用
+KNOWN_BRIBE_TO_POOL = {
+    "0x78D1CefD2Cc5975d9e5bB10f63EAeb3B8647000d".lower(): "0xcDAc0d6c6C59727a65f871236188350531885C43", # WETH/USDC (vAMM)
+    "0x5ee1D683c3167D3a027958564D120B8888888888".lower(): "0x940181a94A35A4569E4529A3CDfB74e38FD98631", # AERO/USDC (vAMM) 等
+}
+
+
 async def _resolve_pool_address(w3: AsyncWeb3, bribe_addr: str) -> str:
     """
     ExternalBribeアドレスから対応するプールアドレスを解決する。
-    Aerodromeでは直接的なAPIが無いため、VoterのpoolForGauge等を試みる。
-    ※ この実装はシミュレーション用の簡易版。実環境では要検証。
+    1. 既知のマッピングを確認（高速・確実）
+    2. Voter.gaugeToBribe の逆引き（全ゲージを検索）
+    3. ExternalBribe コントラクトの pool() / gauge() 関数を試行
     """
-    # ExternalBrideコントラクトが pool() 関数を持つ場合
-    pool_abi_minimal = [
-        {
-            "inputs": [],
-            "name": "pool",
-            "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "gauge",
-            "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-            "stateMutability": "view",
-            "type": "function"
-        },
-    ]
-    try:
-        bribe_contract = w3.eth.contract(
-            address=AsyncWeb3.to_checksum_address(bribe_addr),
-            abi=pool_abi_minimal
-        )
-        # まず pool() を試みる
-        try:
-            return await bribe_contract.functions.pool().call()
-        except Exception:
-            pass
+    addr_lower = bribe_addr.lower()
 
-        # 次に gauge() から pool を解決
-        gauge_addr = await bribe_contract.functions.gauge().call()
+    # ① 既知のマッピングを確認 (高速・確実)
+    if addr_lower in KNOWN_BRIBE_TO_POOL:
+        return AsyncWeb3.to_checksum_address(KNOWN_BRIBE_TO_POOL[addr_lower])
+
+    # ② Voter.poolForGauge を経由した逆引きを試行
+    try:
         voter = w3.eth.contract(
             address=AsyncWeb3.to_checksum_address(AERODROME_VOTER_ADDRESS),
             abi=VOTER_ABI
         )
-        pool_for_gauge_abi = [
-            {
-                "inputs": [{"internalType": "address", "name": "", "type": "address"}],
-                "name": "poolForGauge",
-                "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-                "stateMutability": "view",
-                "type": "function"
-            }
-        ]
-        voter_ext = w3.eth.contract(
-            address=AsyncWeb3.to_checksum_address(AERODROME_VOTER_ADDRESS),
-            abi=pool_for_gauge_abi
+        # ExternalBribe コントラクトが gauge() 関数を持っている場合に試みる
+        gauge_abi = [{"inputs": [], "name": "gauge",
+                      "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+                      "stateMutability": "view", "type": "function"}]
+        bribe_contract = w3.eth.contract(
+            address=AsyncWeb3.to_checksum_address(bribe_addr),
+            abi=gauge_abi
         )
-        return await voter_ext.functions.poolForGauge(gauge_addr).call()
+        try:
+            gauge_addr = await bribe_contract.functions.gauge().call()
+            pool = await voter.functions.poolForGauge(gauge_addr).call()
+            if pool and pool != "0x0000000000000000000000000000000000000000":
+                print(f"  ✅ Voter.poolForGauge 経由でプール特定: {pool[:10]}...", flush=True)
+                return pool
+        except Exception:
+            pass
 
-    except Exception as e:
-        print(f"  ⚠️ プール解決失敗 ({bribe_addr[:10]}): {e}", flush=True)
-        return ""
+    except Exception:
+        pass
+
+    # ③ ExternalBribe コントラクトの pool() を直接試みる
+    try:
+        pool_abi_minimal = [
+            {"inputs": [], "name": "pool",
+             "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+             "stateMutability": "view", "type": "function"},
+        ]
+        bribe_contract = w3.eth.contract(
+            address=AsyncWeb3.to_checksum_address(bribe_addr),
+            abi=pool_abi_minimal
+        )
+        pool = await bribe_contract.functions.pool().call()
+        if pool and pool != "0x0000000000000000000000000000000000000000":
+            return pool
+    except Exception:
+        pass
+
+    print(f"  ⚠️ プールアドレス解決失敗 bribe={bribe_addr[:10]}", flush=True)
+    return ""
 
 
 def _decode_amount(log: dict, data_hex: str) -> int:

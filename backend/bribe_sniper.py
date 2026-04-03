@@ -103,8 +103,19 @@ async def main_loop() -> None:
                 await start_bribe_monitor(w3_wss, position_manager)
 
         except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
             reconnect_count += 1
             print(f"\n❌ WebSocket切断/エラー: {e}", flush=True)
+            
+            error_str = str(e)
+            if "no close frame received or sent" not in error_str and "Connection closed" not in error_str:
+                try:
+                    from sniper.discord_sniper import notify_error
+                    asyncio.create_task(notify_error("Bribe Sniper SIM (Main Loop)", error_trace))
+                except Exception as notify_e:
+                    print(f"⚠️ エラー通知送信失敗: {notify_e}", flush=True)
+                    
             print(f"🔄 5秒後に再接続します... (累計{reconnect_count}回)", flush=True)
             await asyncio.sleep(5)
 
@@ -114,3 +125,13 @@ if __name__ == "__main__":
         asyncio.run(main_loop())
     except KeyboardInterrupt:
         print("\n👋 Bribe Sniper Simulator v3.0 を終了します。", flush=True)
+    except Exception as fatal_e:
+        import traceback
+        error_trace = traceback.format_exc()
+        try:
+            from sniper.discord_sniper import notify_error
+            # 同期コンテキストで実行中のため新しいイベントループで送信
+            asyncio.run(notify_error("Bribe Sniper SIM (Fatal Crash)", error_trace))
+        except Exception:
+            pass
+        raise

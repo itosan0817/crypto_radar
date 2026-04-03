@@ -24,17 +24,19 @@ _price_history: dict[str, deque] = {}
 
 
 async def is_token_whitelisted(w3: AsyncWeb3, token_address: str) -> bool:
-    """Voter コントラクトで対象トークンのホワイトリスト状態を確認する"""
+    """Voter コントラクトで対象トークンのホワイトリスト状態を確認する
+    ※ Aerodrome V2 では isWhitelisted → isWhitelistedToken に変更済み
+    """
     try:
         voter = w3.eth.contract(
             address=AsyncWeb3.to_checksum_address(AERODROME_VOTER_ADDRESS),
             abi=VOTER_ABI
         )
-        return await voter.functions.isWhitelisted(
+        return await voter.functions.isWhitelistedToken(
             AsyncWeb3.to_checksum_address(token_address)
         ).call()
     except Exception as e:
-        print(f"⚠️ [SugarChecker] isWhitelisted チェック失敗: {e}", flush=True)
+        print(f"⚠️ [SugarChecker] isWhitelistedToken チェック失敗: {e}", flush=True)
         return False
 
 

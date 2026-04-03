@@ -120,13 +120,16 @@ POSITION_MONITOR_SEC    = 30         # 30秒ごとに監視
 # ==========================================
 VOTER_ABI = [
     {
-        "inputs": [{"internalType": "address", "name": "token", "type": "address"}],
-        "name": "isWhitelisted",
+        # isWhitelistedToken: public mapping(address => bool) の getter
+        # Aerodrome V2 Voter では isWhitelisted → isWhitelistedToken (public mapping) に変更
+        "inputs": [{"internalType": "address", "name": "", "type": "address"}],
+        "name": "isWhitelistedToken",
         "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
         "stateMutability": "view",
         "type": "function"
     },
     {
+        # weights: public mapping(address => uint256) の getter
         "inputs": [{"internalType": "address", "name": "", "type": "address"}],
         "name": "weights",
         "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
@@ -134,8 +137,25 @@ VOTER_ABI = [
         "type": "function"
     },
     {
+        # gaugeToBribe: ExternalBriibe アドレスから Bribe コントラクトを取得
         "inputs": [{"internalType": "address", "name": "", "type": "address"}],
-        "name": "external_bribes",
+        "name": "gaugeToBribe",
+        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        # poolForGauge: ゲージアドレスからプールアドレスを取得
+        "inputs": [{"internalType": "address", "name": "", "type": "address"}],
+        "name": "poolForGauge",
+        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        # gauges: プールアドレスからゲージアドレスを取得
+        "inputs": [{"internalType": "address", "name": "", "type": "address"}],
+        "name": "gauges",
         "outputs": [{"internalType": "address", "name": "", "type": "address"}],
         "stateMutability": "view",
         "type": "function"
@@ -148,6 +168,7 @@ VOTER_ABI = [
         "type": "function"
     },
 ]
+
 
 POOL_ABI = [
     {

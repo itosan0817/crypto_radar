@@ -153,3 +153,20 @@ class DiscordService:
         }
         cls._send_embed(embed)
 
+    @classmethod
+    def send_error_notification(cls, process_name: str, error_msg: str):
+        """プログラム異常発生時（例外）の通知を送信する"""
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        now_jst_str = cls._format_jst(now_utc)
+        
+        # エラーログが長すぎるとDiscordの2048文字制限に引っかかるため切り詰め
+        error_msg = error_msg[:2000]
+        
+        embed = {
+            "title": f"🚨 [SYSTEM ERROR] {process_name} 異常終了・例外発生",
+            "description": f"プログラムの実行中に致命的なエラーが発生しました。ログを確認してください。\n```python\n{error_msg}\n```",
+            "color": 0xFF0000,
+            "footer": {"text": f"発生時刻: {now_jst_str}"},
+            "timestamp": now_utc.isoformat()
+        }
+        cls._send_embed(embed)
