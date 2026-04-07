@@ -42,16 +42,28 @@ WETH_USDC_REF_POOL_ADDRESS  = "0xcDAc0d6c6C59727a65f871236188350531885C43"
 # ✅ 有効な報酬トークン ホワイトリスト (Base Chain)
 # ==========================================
 WHITELISTED_TOKENS: dict[str, str] = {
+    # 既存 (10個)
     "USDC":   "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     "WETH":   "0x4200000000000000000000000000000000000006",
     "AERO":   "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
     "cbBTC":  "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
     "wstETH": "0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452",
     "cbETH":  "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22",
-    "DEGEN":  "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",
+    "DEGEN":  "0x4ed4E862860beD51a9570b96d89aAf5E1B0Efefed",
     "WELL":   "0xA88594D404727625A9437C3f886C7643872296AE",
     "SNX":    "0x22e6966B799c4D5B13BE962E1D117b56327FDa66",
     "LINK":   "0x514910771AF9Ca656af840dff83E8264EcF986CA",
+    # 追加 (10個)
+    "PYUSD":  "0x8b175474E8062F03f98235Af4061f301C91Be582",  # PayPal USD
+    "USDbC":  "0xd9aaEC86B65D86f6A7B5B1B0C42FFA531710b6CA",  # Bridged USDC
+    "DAI":    "0x50c5725949A6F0C72E6C4a641f24049a917DB0CB",  # DAI
+    "EURC":   "0x1abaea1f7c830fed89f2532441e15AC2a061263d",  # Euro Coin
+    "ezETH":  "0x2416092519515151515151515151515151515151",  # ezETH (Placeholder Check Needed)
+    "weETH":  "0x04C066422FBD43480184942c3C83D818aba10758",  # weETH
+    "rsETH":  "0xab57D6BB1349fF1626db86D3380B2256E2a2A88a",  # rsETH
+    "clAERO": "0x403d1596700c25d888f21E5336d3c8c7B34638De",  # Concentrated AERO
+    "Virtual":"0x0b3e328455c4055EEb9e3f84b5534924DA9480FD",  # Virtual Protocol
+    "LUSD":   "0xED8880004990A2E2A661556a3EcC8EF477960714",  # LUSD
 }
 
 # 小文字アドレスのセット（高速チェック用）
@@ -76,9 +88,9 @@ WETH_ADDRESS = "0x4200000000000000000000000000000000000006"
 # ==========================================
 # 💰 資金管理パラメータ
 # ==========================================
-VIRTUAL_TOTAL_FUNDS_JST = 30_000.0   # 仮想総資金 (JST)
-MAX_POSITION_SIZE_S_JST = 6_000.0    # S級 最大ポジションサイズ
-MAX_POSITION_SIZE_A_JST = 3_000.0    # A級 最大ポジションサイズ
+VIRTUAL_TOTAL_FUNDS_JST = 300_000.0  # 仮想総資金 (JST)
+MAX_POSITION_SIZE_S_JST = 60_000.0   # S級 最大ポジションサイズ
+MAX_POSITION_SIZE_A_JST = 30_000.0   # A級 最大ポジションサイズ
 GAS_COST_USD            = 0.5        # 1往復ガス代 (USD)
 JST_PER_USD             = 150.0      # レート換算: 1 USD ≒ 150 JST (円)
 GAS_COST_JST            = GAS_COST_USD * JST_PER_USD  # = 75.0 JST
@@ -86,13 +98,13 @@ GAS_COST_JST            = GAS_COST_USD * JST_PER_USD  # = 75.0 JST
 # ==========================================
 # 📊 エントリー判定パラメータ
 # ==========================================
-MIN_TVL_USD             = 10_000.0   # 最低TVL フィルタ ($)
+MIN_TVL_USD             = 5_000.0    # 最低TVL フィルタ ($)
 PRICE_SPIKE_THRESHOLD   = 0.05       # 価格急騰フィルタ (5%)
 PRICE_SPIKE_WINDOW_SEC  = 5 * 60     # 急騰監視ウィンドウ (5分)
-MIN_NET_EV_RATIO        = 0.015      # NetEV 最低比率 (T_s の 1.5%)
-MIN_ENTRY_SCORE         = 50         # エントリー最低スコア
-SCORE_S_GRADE           = 75         # S級スコアしきい値
-SCORE_A_GRADE           = 50         # A級スコアしきい値
+MIN_NET_EV_RATIO        = 0.005      # NetEV 最低比率 (T_s の 0.5%)
+MIN_ENTRY_SCORE         = 30         # エントリー最低スコア
+SCORE_S_GRADE           = 60         # S級スコアしきい値
+SCORE_A_GRADE           = 30         # A級スコアしきい値
 ENTRY_DELAY_MIN_SEC     = 2          # 約定遅延 最小秒
 ENTRY_DELAY_MAX_SEC     = 5          # 約定遅延 最大秒
 
