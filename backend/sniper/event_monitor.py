@@ -29,16 +29,15 @@ from sniper.position_manager import PositionManager
 
 # ──────────────────────────────────────────────
 # NotifyReward イベントシグネチャ
-# Aerodrome (Velodrome v2 ベース):
+# Aerodrome v2 BribeVotingReward の正確な定義:
 #   event NotifyReward(address indexed from, address indexed reward,
 #                      uint256 indexed epoch, uint256 amount)
+# Topic0 = keccak256("NotifyReward(address,address,uint256,uint256)")
+#         = 0x4461044129b0933758b29c9b1f237f374765d75240212701764653556271966a
 # ──────────────────────────────────────────────
-NOTIFY_REWARD_TOPIC = (
-    "0x" + AsyncWeb3.keccak(
-        text="NotifyReward(address,address,uint256,uint256)"
-    ).hex()
-)
-# 旧バージョン互換 (indexed epoch なし)
+NOTIFY_REWARD_TOPIC = "0x4461044129b0933758b29c9b1f237f374765d75240212701764653556271966a"
+
+# 旧バージョン互換 (indexed epoch なし: from, reward, amount)
 NOTIFY_REWARD_TOPIC_V1 = (
     "0x" + AsyncWeb3.keccak(
         text="NotifyReward(address,address,uint256)"

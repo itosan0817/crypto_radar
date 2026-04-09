@@ -1,0 +1,24 @@
+[*] NotifyReward Topic (v2): 0x52977ea98a2220a03ee9ba5cb003ada08d394ea10155483c95dc2dc77a7eb24b
+[*] NotifyReward Topic (v1): 0xf70d5c697de7ea828df48e5c4573cb2194c659f1901f70110c52b066dcf50826
+[*] ホワイトリスト件数: 20個
+
+[*] 最新ブロック: 44481179
+[*] スキャン範囲: Block 44463179 〜 44481179
+[*] NotifyRewardイベントを 1500ブロック刻みで検索中...
+
+  Block 44463179~44464678: エラー (400, message='Bad Request', url='https://base-mainnet.g.alchemy.com/v2/lcau4KV3k-6quLk___bH2')
+  Block 44464679~44466178: エラー (400, message='Bad Request', url='https://base-mainnet.g.alchemy.com/v2/lcau4KV3k-6quLk___bH2')
+  Block 44466179~44467678: エラー (400, message='Bad Request', url='https://base-mainnet.g.alchemy.com/v2/lcau4KV3k-6quLk___bH2')
+  Block 44467679~44469178: エラー (400, message='Bad Request', url='https://base-mainnet.g.alchemy.com/v2/lcau4KV3k-6quLk___bH2')
+  Block 44469179~44470678: エラー (400, message='Bad Request', url='https://base-mainnet.g.alchemy.com/v2/lcau4KV3k-6quLk___bH2')
+  Block 44470679~44472178: エラー (400, message='Bad Request', url='https://base-mainnet.g.alchemy.com/v2/lcau4KV3k-6quLk___bH2')
+  Block 44472179~44473678: エラー (400, message='Bad Request', url='https://base-mainnet.g.alchemy.com/v2/lcau4KV3k-6quLk___bH2')
+  Block 44473679~44475178: エラー (400, message='Bad Request', url='https://base-mainnet.g.alchemy.com/v2/lcau4KV3k-6quLk___bH2')
+  Block 44475179~44476678: エラー (400, message='Bad Request', url='https://base-mainnet.g.alchemy.com/v2/lcau4KV3k-6quLk___bH2')
+  Block 44476679~44478178: エラー (400, message='Bad Request', url='https://base-mainnet.g.alchemy.com/v2/lcau4KV3k-6quLk___bH2')
+  Block 44478179~44479678: エラー (400, message='Bad Request', url='https://base-mainnet.g.alchemy.com/v2/lcau4KV3k-6quLk___bH2')
+  Block 44479679~44481178: エラー (400, message='Bad Request', url='https://base-mainnet.g.alchemy.com/v2/lcau4KV3k-6quLk___bH2')
+
+✅ 合計 発見したNotifyRewardイベント: 0件
+
+✅ ホワイトリスト対象のイベント数: 0件 (先頭30件中)

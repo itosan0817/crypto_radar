@@ -1,0 +1,16 @@
+Apr 03 09:39:40 radar-server systemd[1]: Started bribe-sniper.service - Bribe Sniper Service.
+Apr 03 21:41:34 radar-server systemd[1]: Stopping bribe-sniper.service - Bribe Sniper Service...
+Apr 03 21:41:34 radar-server systemd[1]: bribe-sniper.service: Deactivated successfully.
+Apr 03 21:41:34 radar-server systemd[1]: Stopped bribe-sniper.service - Bribe Sniper Service.
+Apr 03 21:41:34 radar-server systemd[1]: bribe-sniper.service: Consumed 32.405s CPU time.
+Apr 03 21:41:34 radar-server systemd[1]: Started bribe-sniper.service - Bribe Sniper Service.
+Apr 04 23:36:45 radar-server systemd[1]: Stopping bribe-sniper.service - Bribe Sniper Service...
+Apr 04 23:36:45 radar-server systemd[1]: bribe-sniper.service: Deactivated successfully.
+Apr 04 23:36:45 radar-server systemd[1]: Stopped bribe-sniper.service - Bribe Sniper Service.
+Apr 04 23:36:45 radar-server systemd[1]: bribe-sniper.service: Consumed 1min 31.645s CPU time.
+Apr 04 23:36:45 radar-server systemd[1]: Started bribe-sniper.service - Bribe Sniper Service.
+Apr 07 12:53:07 radar-server systemd[1]: Stopping bribe-sniper.service - Bribe Sniper Service...
+Apr 07 12:53:07 radar-server systemd[1]: bribe-sniper.service: Deactivated successfully.
+Apr 07 12:53:07 radar-server systemd[1]: Stopped bribe-sniper.service - Bribe Sniper Service.
+Apr 07 12:53:07 radar-server systemd[1]: bribe-sniper.service: Consumed 3min 34.670s CPU time.
+Apr 07 12:53:07 radar-server systemd[1]: Started bribe-sniper.service - Bribe Sniper Service.

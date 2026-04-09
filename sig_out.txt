@@ -1,0 +1,23 @@
+=== Aerodrome NotifyRewardシグネチャ診断 ===
+
+  NotifyReward(address,address,uint256,uint256)
+    => Topic: 0x52977ea98a2220a03ee9ba5cb003ada08d394ea10155483c95dc2dc77a7eb24b
+
+  NotifyReward(address,address,uint256)
+    => Topic: 0xf70d5c697de7ea828df48e5c4573cb2194c659f1901f70110c52b066dcf50826
+
+  NotifyReward(address indexed,address indexed,uint256 indexed,uint256)
+    => Topic: 0xc2ca29bb1533485ce5bf593c92fd73c776ff749b8cf7e3398432e412a976c52c
+
+  RewardAdded(address,uint256)
+    => Topic: 0xac24935fd910bc682b5ccb1a07b718cadf8cf2f6d1404c4f3ddc3662dae40e29
+
+  NotifyReward(address,uint256)
+    => Topic: 0x095667752957714306e1a6ad83495404412df6fdb932fca6dc849a7ee910d4c1
+
+
+最新ブロック: 44481276
+既知のBribeコントラクトで過去100ブロックを検索...
+
+  0x5e27B876AF8A073d77E0a9e151F46CBED3Be8af8: エラー (('Address has an invalid EIP-55 checksum. After looking up the address from the original source, try again.', '0x5e27B876AF8A073d77E0a9e151F46CBED3Be8af8'))
+  0xB875F3F2A7a6f60E462e09a6e14a92DAfBB0e1Bb: エラー (('Address has an invalid EIP-55 checksum. After looking up the address from the original source, try again.', '0xB875F3F2A7a6f60E462e09a6e14a92DAfBB0e1Bb'))
