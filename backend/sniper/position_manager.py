@@ -20,6 +20,7 @@ from sniper.models import Position, ExitRecord, ExitPhase, PositionStatus
 from sniper.sugar_checker import get_token_price_usd, get_weth_price_usd
 from sniper.firestore_sniper import FirestoreSniperService
 from sniper.discord_sniper import notify_exit
+from sniper.safe_io import safe_print
 
 
 class PositionManager:
@@ -46,10 +47,9 @@ class PositionManager:
         self._positions[pos.position_id] = pos
         self._target_tokens[pos.position_id] = target_token_address
         self._pool_addrs[pos.position_id] = pos.pool_address
-        print(
+        safe_print(
             f"➕ [PositionManager] ポジション追加: {pos.position_id} "
-            f"({pos.pool_name} / {pos.grade}級 / エントリー ${pos.entry_price_usd:.4f})",
-            flush=True
+            f"({pos.pool_name} / {pos.grade}級 / エントリー ${pos.entry_price_usd:.4f})"
         )
 
     def get_all(self) -> list[Position]:
@@ -66,12 +66,12 @@ class PositionManager:
         30秒ごとに全ポジションの現在価格を確認し、
         出口条件を満たしていれば自動決済する。
         """
-        print("🔄 [PositionManager] ポジション監視ループ 開始", flush=True)
+        safe_print("🔄 [PositionManager] ポジション監視ループ 開始")
         while True:
             try:
                 await self._check_all_positions()
             except Exception as e:
-                print(f"❌ [PositionManager] 監視ループエラー: {e}", flush=True)
+                safe_print(f"❌ [PositionManager] 監視ループエラー: {e}")
             await asyncio.sleep(POSITION_MONITOR_SEC)
 
     async def _check_all_positions(self) -> None:
@@ -113,7 +113,7 @@ class PositionManager:
                     closed_ids.append(pid)
 
             except Exception as e:
-                print(f"⚠️ [PositionManager] {pid} チェックエラー: {e}", flush=True)
+                safe_print(f"⚠️ [PositionManager] {pid} チェックエラー: {e}")
 
         # クローズ済みを管理対象から削除
         for pid in closed_ids:
@@ -230,10 +230,9 @@ class PositionManager:
         )
         pos.exit_records.append(exit_rec)
 
-        print(
+        safe_print(
             f"✅ [PositionManager] {phase} 決済: {pos.position_id} "
-            f"価格=${exit_price_usd:.4f} 損益={pnl_jst:+.1f}JST",
-            flush=True
+            f"価格=${exit_price_usd:.4f} 損益={pnl_jst:+.1f}JST"
         )
 
         # 非同期でFirestore保存・Discord通知
@@ -276,12 +275,12 @@ class PositionManager:
                 count += 1
 
             except Exception as e:
-                print(f"⚠️ [PositionManager] 強制クローズ失敗 {pid}: {e}", flush=True)
+                safe_print(f"⚠️ [PositionManager] 強制クローズ失敗 {pid}: {e}")
 
         # 全クリア
         self._positions.clear()
         self._target_tokens.clear()
         self._pool_addrs.clear()
 
-        print(f"🏳️ [PositionManager] {count}件のポジションを強制クローズしました。", flush=True)
+        safe_print(f"🏳️ [PositionManager] {count}件のポジションを強制クローズしました。")
         return count

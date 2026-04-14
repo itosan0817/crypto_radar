@@ -18,6 +18,7 @@ from sniper.config import (
     VOTER_ABI, POOL_ABI, ERC20_ABI,
     MIN_TVL_USD, PRICE_SPIKE_THRESHOLD, PRICE_SPIKE_WINDOW_SEC,
 )
+from sniper.safe_io import safe_print
 
 # 過去5分間の価格履歴（プールアドレス → deque(タイムスタンプ, 価格)）
 _price_history: dict[str, deque] = {}
@@ -26,18 +27,25 @@ _price_history: dict[str, deque] = {}
 async def is_token_whitelisted(w3: AsyncWeb3, token_address: str) -> bool:
     """Voter コントラクトで対象トークンのホワイトリスト状態を確認する
     ※ Aerodrome V2 では isWhitelisted → isWhitelistedToken に変更済み
+    RPC の一時失敗時は1回だけ再試行する。
     """
-    try:
-        voter = w3.eth.contract(
-            address=AsyncWeb3.to_checksum_address(AERODROME_VOTER_ADDRESS),
-            abi=VOTER_ABI
-        )
-        return await voter.functions.isWhitelistedToken(
-            AsyncWeb3.to_checksum_address(token_address)
-        ).call()
-    except Exception as e:
-        print(f"⚠️ [SugarChecker] isWhitelistedToken チェック失敗: {e}", flush=True)
-        return False
+    voter = w3.eth.contract(
+        address=AsyncWeb3.to_checksum_address(AERODROME_VOTER_ADDRESS),
+        abi=VOTER_ABI
+    )
+    addr = AsyncWeb3.to_checksum_address(token_address)
+    last_err: Optional[Exception] = None
+    for attempt in range(2):
+        try:
+            return await voter.functions.isWhitelistedToken(addr).call()
+        except Exception as e:
+            last_err = e
+            if attempt == 0:
+                await asyncio.sleep(0.2)
+    safe_print(
+        f"⚠️ [SugarChecker] isWhitelistedToken チェック失敗（2回）: {last_err}",
+    )
+    return False
 
 
 async def _get_token_decimals(w3: AsyncWeb3, token_address: str) -> int:
@@ -50,6 +58,11 @@ async def _get_token_decimals(w3: AsyncWeb3, token_address: str) -> int:
         return await token.functions.decimals().call()
     except Exception:
         return 18
+
+
+async def get_token_decimals(w3: AsyncWeb3, token_address: str) -> int:
+    """ERC20 decimals（外部モジュール用の公開ラッパー）"""
+    return await _get_token_decimals(w3, token_address)
 
 
 async def _get_token_symbol(w3: AsyncWeb3, token_address: str) -> str:
@@ -77,7 +90,7 @@ async def get_weth_price_usd(w3: AsyncWeb3) -> float:
         # USDC は 6 decimals
         return float(amount_out) / 1e6
     except Exception as e:
-        print(f"⚠️ [SugarChecker] WETH価格取得失敗、デフォルト3500を使用: {e}", flush=True)
+        safe_print(f"⚠️ [SugarChecker] WETH価格取得失敗、デフォルト3500を使用: {e}")
         return 3500.0  # フォールバック価格
 
 
@@ -132,7 +145,7 @@ async def get_token_price_usd(w3: AsyncWeb3, token_address: str, pool_address: s
             return 0.0
 
     except Exception as e:
-        print(f"⚠️ [SugarChecker] トークン価格取得失敗 {token_address[:8]}: {e}", flush=True)
+        safe_print(f"⚠️ [SugarChecker] トークン価格取得失敗 {token_address[:8]}: {e}")
         return 0.0
 
 
@@ -166,7 +179,7 @@ async def get_pool_info(w3: AsyncWeb3, pool_address: str) -> dict:
             "pool_name": f"{sym0}/{sym1}",
         }
     except Exception as e:
-        print(f"⚠️ [SugarChecker] プール情報取得失敗 {pool_address[:10]}: {e}", flush=True)
+        safe_print(f"⚠️ [SugarChecker] プール情報取得失敗 {pool_address[:10]}: {e}")
         return {}
 
 
@@ -195,7 +208,7 @@ async def get_pool_tvl_usd(w3: AsyncWeb3, pool_address: str, pool_info: dict,
         return tvl
 
     except Exception as e:
-        print(f"⚠️ [SugarChecker] TVL計算失敗 {pool_address[:10]}: {e}", flush=True)
+        safe_print(f"⚠️ [SugarChecker] TVL計算失敗 {pool_address[:10]}: {e}")
         return 0.0
 
 
@@ -240,7 +253,7 @@ async def get_pool_weight(w3: AsyncWeb3, pool_address: str) -> int:
             AsyncWeb3.to_checksum_address(pool_address)
         ).call()
     except Exception as e:
-        print(f"⚠️ [SugarChecker] weight取得失敗: {e}", flush=True)
+        safe_print(f"⚠️ [SugarChecker] weight取得失敗: {e}")
         return 0
 
 
@@ -253,5 +266,5 @@ async def get_total_weight(w3: AsyncWeb3) -> int:
         )
         return await voter.functions.totalWeight().call()
     except Exception as e:
-        print(f"⚠️ [SugarChecker] totalWeight取得失敗: {e}", flush=True)
+        safe_print(f"⚠️ [SugarChecker] totalWeight取得失敗: {e}")
         return 1

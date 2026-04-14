@@ -13,6 +13,7 @@ import pytz
 
 from sniper.config import DISCORD_WEBHOOK_URL
 from sniper.models import Position, ExitRecord, ExitPhase
+from sniper.safe_io import safe_print
 
 TZ_JST = pytz.timezone("Asia/Tokyo")
 
@@ -31,9 +32,24 @@ def _fmt_jst(utc_dt: datetime.datetime) -> str:
     return utc_dt.astimezone(TZ_JST).strftime("%Y-%m-%d %H:%M:%S JST")
 
 
+def _webhook_configured() -> bool:
+    u = DISCORD_WEBHOOK_URL or ""
+    return bool(u) and "YOUR_DISCORD" not in u and u.startswith("https://")
+
+
 async def _send_embed(embed: dict) -> None:
     """Discord Webhook に Embed形式のメッセージを非同期送信する"""
-    if not DISCORD_WEBHOOK_URL or "YOUR_DISCORD" in DISCORD_WEBHOOK_URL:
+    if not DISCORD_WEBHOOK_URL:
+        safe_print(
+            "⚠️ [DiscordSniper] Webhook URL 未設定のため送信しません。"
+            " backend/.env に BRIBE_WEBHOOK_URL=... を設定してください。"
+        )
+        return
+    if "YOUR_DISCORD" in DISCORD_WEBHOOK_URL:
+        safe_print("⚠️ [DiscordSniper] Webhook がプレースホルダーのため送信しません。")
+        return
+    if not DISCORD_WEBHOOK_URL.startswith("https://"):
+        safe_print("⚠️ [DiscordSniper] Webhook URL が https で始まりません。")
         return
     try:
         async with aiohttp.ClientSession() as session:
@@ -42,11 +58,51 @@ async def _send_embed(embed: dict) -> None:
                 json={"embeds": [embed]},
                 timeout=aiohttp.ClientTimeout(total=10)
             )
+            body_preview = ""
             if resp.status not in (200, 204):
-                body = await resp.text()
-                print(f"⚠️ [DiscordSniper] 送信失敗 status={resp.status}: {body[:100]}", flush=True)
+                body_preview = (await resp.text())[:200]
+                safe_print(f"⚠️ [DiscordSniper] 送信失敗 status={resp.status}: {body_preview[:100]}")
     except Exception as e:
-        print(f"⚠️ [DiscordSniper] 送信エラー: {e}", flush=True)
+        safe_print(f"⚠️ [DiscordSniper] 送信エラー: {e}")
+
+
+async def notify_bribe_sniper_started() -> None:
+    """起動確認用（Webhook が有効なとき1通だけ送る）"""
+    if not _webhook_configured():
+        safe_print(
+            "⚠️ [DiscordSniper] 起動確認通知をスキップしました。"
+            " `.env` の `BRIBE_WEBHOOK_URL` に Discord の Incoming Webhook URL を設定してください。"
+        )
+        return
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    embed = {
+        "title": "✅ Bribe Sniper 起動",
+        "description": "プロセスが起動しました。Bribe 検知時は別途エントリー通知が届きます。",
+        "color": COLOR_REPORT,
+        "footer": {"text": f"{_fmt_jst(now_utc)} | Bribe Sniper v3.0"},
+        "timestamp": now_utc.isoformat(),
+    }
+    await _send_embed(embed)
+
+
+async def notify_health_check() -> None:
+    """毎日定例の健康診断通知（Bribe Sniper）"""
+    if not _webhook_configured():
+        return
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    embed = {
+        "title": "📡 定例システム健康診断報告 | Bribe Sniper",
+        "description": "24時間稼働の死活監視チェックが完了しました。現在Bribe検知エンジンは正常に待機中です。",
+        "color": 0x3498db, # 青
+        "fields": [
+            {"name": "🛰️ 稼働プロセス", "value": "🟢 Bribe Sniper SIM (Main)", "inline": True},
+            {"name": "⏳ 監視状況", "value": "🟢 正常 (Active Scan)", "inline": True},
+            {"name": "🗓️ 最終確認時刻", "value": f"`{_fmt_jst(now_utc)}`", "inline": False}
+        ],
+        "footer": {"text": "Bribe Sniper v3.0 | 24/7 Monitoring System"},
+        "timestamp": now_utc.isoformat(),
+    }
+    await _send_embed(embed)
 
 
 # ────────────────────────────────────────────────────────

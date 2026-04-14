@@ -1,0 +1,81 @@
+use_runtime_params: false
+symbol: BTCUSDT
+base_url: https://fapi.binance.com
+
+intervals:
+  signal: 15m
+  features:
+    - 15m
+    - 1h
+    - 4h
+    - 1d
+
+data:
+  cache_sqlite: data/btc_klines.sqlite
+
+regression:
+  lookback_bars:
+    m15: 24
+    "1h": 24
+    "4h": 20
+    "1d": 20
+
+pattern:
+  window: 8
+  top_k: 3
+  min_similarity: -1.0
+  horizon_bars: 1
+
+model:
+  forward_bars: 1
+  train_min_samples: 50
+  calibration: null
+
+combine:
+  weight_model: 1.0
+  weight_pattern: 0.0
+  entry_threshold: -1.0
+
+filters:
+  enabled: false
+  min_confidence: 0.0
+  mtf_align_1h: false
+  agreement_required: false
+  atr_period: 5
+  atr_low_quantile: 0.0
+  atr_high_quantile: 1.0
+  expectancy_gate: false
+  taker_fee_rate: 0.0004
+  slippage_bps: 2.0
+
+risk:
+  tp_atr_mult: 0.6
+  sl_atr_mult: 0.6
+  max_hold_bars: 6
+  position_fraction: 0.2
+  max_daily_loss_pct: 1.0
+  cooldown_after_losses: 999
+  cooldown_bars: 0
+
+backtest:
+  initial_quote: 10000.0
+  funding_rate_per_8h: 0.0
+
+walk_forward:
+  train_bars: 1200
+  test_bars: 200
+  embargo_bars: 50
+  step_bars: 200
+  grid:
+    tp_atr_mult: [0.6]
+    sl_atr_mult: [0.6]
+    weight_model: [1.0]
+
+paper:
+  poll_seconds: 10
+  timezone: Asia/Tokyo
+  train_window_bars: 1200
+  state_path: data/paper_state.loose.json
+
+logging:
+  jsonl_path: data/paper_events.loose.jsonl

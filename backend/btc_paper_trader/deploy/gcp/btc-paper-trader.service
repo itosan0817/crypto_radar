@@ -1,0 +1,25 @@
+# systemd ユニット（Linux VM 用）
+# インストール時に @DEPLOY_ROOT@ をリポジトリルート（crypto_radar）の絶対パスに置換する。
+# 例: sudo sed -i 's|@DEPLOY_ROOT@|/home/ubuntu/crypto_radar|g' /etc/systemd/system/btc-paper-trader.service
+#
+# User= を VM のログインユーザに合わせて編集すること。
+
+[Unit]
+Description=BTC Paper Trader (Binance USDT-M simulation)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+WorkingDirectory=@DEPLOY_ROOT@/backend
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-@DEPLOY_ROOT@/backend/.env
+ExecStart=@DEPLOY_ROOT@/backend/venv/bin/python -m btc_paper_trader paper
+Restart=always
+RestartSec=15
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

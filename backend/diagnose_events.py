@@ -12,6 +12,7 @@ from sniper.config import (
     ALCHEMY_BASE_HTTP_URL, ALCHEMY_BASE_WSS_URL,
     WHITELISTED_TOKEN_ADDRESSES, TOKEN_SYMBOL_MAP
 )
+from sniper.safe_io import safe_print
 
 # NotifyRewardのイベントシグネチャ
 NOTIFY_REWARD_TOPIC = (
@@ -25,9 +26,9 @@ NOTIFY_REWARD_TOPIC_V1 = (
     ).hex()
 )
 
-print(f"[*] NotifyReward Topic (v2): {NOTIFY_REWARD_TOPIC}")
-print(f"[*] NotifyReward Topic (v1): {NOTIFY_REWARD_TOPIC_V1}")
-print(f"[*] ホワイトリスト件数: {len(WHITELISTED_TOKEN_ADDRESSES)}個")
+safe_print(f"[*] NotifyReward Topic (v2): {NOTIFY_REWARD_TOPIC}")
+safe_print(f"[*] NotifyReward Topic (v1): {NOTIFY_REWARD_TOPIC_V1}")
+safe_print(f"[*] ホワイトリスト件数: {len(WHITELISTED_TOKEN_ADDRESSES)}個")
 
 async def check_recent_events():
     w3 = AsyncWeb3(AsyncWeb3.AsyncHTTPProvider(ALCHEMY_BASE_HTTP_URL))
@@ -39,9 +40,9 @@ async def check_recent_events():
     TOTAL_BLOCKS = 18000
     from_block = latest_block - TOTAL_BLOCKS
     
-    print(f"\n[*] 最新ブロック: {latest_block}")
-    print(f"[*] スキャン範囲: Block {from_block} 〜 {latest_block}")
-    print(f"[*] NotifyRewardイベントを {CHUNK}ブロック刻みで検索中...\n")
+    safe_print(f"\n[*] 最新ブロック: {latest_block}")
+    safe_print(f"[*] スキャン範囲: Block {from_block} 〜 {latest_block}")
+    safe_print(f"[*] NotifyRewardイベントを {CHUNK}ブロック刻みで検索中...\n")
     
     all_logs = []
     cur = from_block
@@ -54,12 +55,12 @@ async def check_recent_events():
                 "topics": [[NOTIFY_REWARD_TOPIC, NOTIFY_REWARD_TOPIC_V1]],
             })
             all_logs.extend(chunk_logs)
-            print(f"  Block {cur}~{end}: {len(chunk_logs)}件")
+            safe_print(f"  Block {cur}~{end}: {len(chunk_logs)}件")
         except Exception as e:
-            print(f"  Block {cur}~{end}: エラー ({e})")
+            safe_print(f"  Block {cur}~{end}: エラー ({e})")
         cur = end + 1
     
-    print(f"\n✅ 合計 発見したNotifyRewardイベント: {len(all_logs)}件")
+    safe_print(f"\n✅ 合計 発見したNotifyRewardイベント: {len(all_logs)}件")
     
     whitelist_hits = 0
     for log in all_logs[:30]:  # 最初の30件を表示
@@ -76,11 +77,11 @@ async def check_recent_events():
         if in_whitelist:
             whitelist_hits += 1
         
-        print(f"  - Block {log.get('blockNumber')}: token={symbol} ({reward_addr[:10]}...) whitelist={in_whitelist}")
+        safe_print(f"  - Block {log.get('blockNumber')}: token={symbol} ({reward_addr[:10]}...) whitelist={in_whitelist}")
     
-    print(f"\n✅ ホワイトリスト対象のイベント数: {whitelist_hits}件 (先頭30件中)")
+    safe_print(f"\n✅ ホワイトリスト対象のイベント数: {whitelist_hits}件 (先頭30件中)")
     
     if len(all_logs) > 30:
-        print(f"  ※ 残り {len(all_logs) - 30} 件は省略")
+        safe_print(f"  ※ 残り {len(all_logs) - 30} 件は省略")
 
 asyncio.run(check_recent_events())

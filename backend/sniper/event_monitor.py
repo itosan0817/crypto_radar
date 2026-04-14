@@ -7,18 +7,31 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import json
+import os
 
 from web3 import AsyncWeb3
 
 from sniper.config import (
-    WHITELISTED_TOKEN_ADDRESSES, TOKEN_SYMBOL_MAP,
-    MIN_TVL_USD, AERODROME_VOTER_ADDRESS, VOTER_ABI, JST_PER_USD,
+    WHITELISTED_TOKEN_ADDRESSES,
+    TOKEN_SYMBOL_MAP,
+    STABLECOIN_ADDRESSES,
+    MIN_TVL_USD,
+    AERODROME_VOTER_ADDRESS,
+    VOTER_ABI,
+    JST_PER_USD,
 )
 from sniper.models import BribeEvent, Position, PositionStatus
 from sniper.sugar_checker import (
-    is_token_whitelisted, get_pool_info, get_pool_tvl_usd,
-    get_weth_price_usd, get_token_price_usd,
-    check_price_spike, get_pool_weight, get_total_weight,
+    is_token_whitelisted,
+    get_pool_info,
+    get_pool_tvl_usd,
+    get_weth_price_usd,
+    get_token_price_usd,
+    get_token_decimals,
+    check_price_spike,
+    get_pool_weight,
+    get_total_weight,
 )
 from sniper.net_ev_engine import (
     calculate_entry_score, calculate_net_ev, simulate_entry_price,
@@ -26,16 +39,21 @@ from sniper.net_ev_engine import (
 from sniper.firestore_sniper import FirestoreSniperService
 from sniper.discord_sniper import notify_entry, notify_rejected
 from sniper.position_manager import PositionManager
+from sniper.safe_io import safe_print
 
 # ──────────────────────────────────────────────
 # NotifyReward イベントシグネチャ
 # Aerodrome v2 BribeVotingReward の正確な定義:
 #   event NotifyReward(address indexed from, address indexed reward,
 #                      uint256 indexed epoch, uint256 amount)
-# Topic0 = keccak256("NotifyReward(address,address,uint256,uint256)")
-#         = 0x4461044129b0933758b29c9b1f237f374765d75240212701764653556271966a
 # ──────────────────────────────────────────────
-NOTIFY_REWARD_TOPIC = "0x4461044129b0933758b29c9b1f237f374765d75240212701764653556271966a"
+# ※ ハードコーディングのハッシュ値が不正だったため、
+#    keccak256 で動的に生成して正確な値を使用する
+NOTIFY_REWARD_TOPIC = (
+    "0x" + AsyncWeb3.keccak(
+        text="NotifyReward(address,address,uint256,uint256)"
+    ).hex()
+)
 
 # 旧バージョン互換 (indexed epoch なし: from, reward, amount)
 NOTIFY_REWARD_TOPIC_V1 = (
@@ -43,6 +61,68 @@ NOTIFY_REWARD_TOPIC_V1 = (
         text="NotifyReward(address,address,uint256)"
     ).hex()
 )
+
+_NOTIFY_SIG_LO = {NOTIFY_REWARD_TOPIC.lower(), NOTIFY_REWARD_TOPIC_V1.lower()}
+
+
+def _hex_digits_from_rpc_field(value: object) -> str:
+    """RPC の topic / address / tx を小文字の16進数字列のみに正規化（型ゆれ対策）。"""
+    if value is None:
+        return ""
+    try:
+        if isinstance(value, (bytes, bytearray)):
+            return bytes(value).hex().lower()
+        if hasattr(value, "hex") and callable(value.hex):
+            h = value.hex()
+            if isinstance(h, bytes):
+                h = h.decode("ascii", errors="ignore")
+            if isinstance(h, str):
+                return h.lower().replace("0x", "")
+    except Exception:
+        pass
+    s = str(value).strip().lower()
+    if s.startswith("0x"):
+        s = s[2:]
+    return "".join(c for c in s if c in "0123456789abcdef")
+
+
+def _canonical_topic0(value: object) -> str | None:
+    d = _hex_digits_from_rpc_field(value)
+    if not d:
+        return None
+    if len(d) > 64:
+        d = d[-64:]
+    if len(d) != 64:
+        return None
+    return "0x" + d
+
+
+def _address_from_topic(value: object) -> str | None:
+    """indexed address は 32 バイト topic の下位 20 バイト（末尾40hex）。"""
+    d = _hex_digits_from_rpc_field(value)
+    if len(d) < 40:
+        return None
+    tail = d[-40:]
+    if len(tail) != 40 or any(c not in "0123456789abcdef" for c in tail):
+        return None
+    return "0x" + tail
+
+
+def _address_from_log_contract(value: object) -> str | None:
+    """ログの contract address（20 バイトまたは hex 文字列）。"""
+    d = _hex_digits_from_rpc_field(value)
+    if len(d) < 40:
+        return None
+    return "0x" + d[-40:]
+
+
+def _tx_hash_from_log(value: object) -> str:
+    d = _hex_digits_from_rpc_field(value)
+    if len(d) > 64:
+        d = d[-64:]
+    if not d:
+        return "0x"
+    return "0x" + d
 
 
 async def start_bribe_monitor(w3_wss: AsyncWeb3, position_manager: PositionManager) -> None:
@@ -56,14 +136,25 @@ async def start_bribe_monitor(w3_wss: AsyncWeb3, position_manager: PositionManag
         for addr in WHITELISTED_TOKEN_ADDRESSES
     ]
 
-    subscription_id = await w3_wss.eth.subscribe(
-        "logs",
-        {
-            # NotifyReward イベント (v1/v2 両方を購読)
-            "topics": [[NOTIFY_REWARD_TOPIC, NOTIFY_REWARD_TOPIC_V1]],
-        }
-    )
-    print(f"📡 [EventMonitor] NotifyReward 購読開始 ID: {subscription_id}", flush=True)
+    # topic0=シグネチャ, topic1=from 任意, topic2=報酬トークン（ホワイトリストのみ）
+    strict_filter = {
+        "topics": [
+            [NOTIFY_REWARD_TOPIC, NOTIFY_REWARD_TOPIC_V1],
+            None,
+            reward_topics,
+        ],
+    }
+    loose_filter = {
+        "topics": [[NOTIFY_REWARD_TOPIC, NOTIFY_REWARD_TOPIC_V1]],
+    }
+    try:
+        subscription_id = await w3_wss.eth.subscribe("logs", strict_filter)
+    except Exception as e:
+        safe_print(
+            f"⚠️ [EventMonitor] 報酬トークン絞り込み購読に失敗、緩いフィルタにフォールバック: {e}",
+        )
+        subscription_id = await w3_wss.eth.subscribe("logs", loose_filter)
+    safe_print(f"📡 [EventMonitor] NotifyReward 購読開始 ID: {subscription_id}")
 
     async for response in w3_wss.socket.process_subscriptions():
         try:
@@ -75,15 +166,13 @@ async def start_bribe_monitor(w3_wss: AsyncWeb3, position_manager: PositionManag
             if len(topics) < 3:
                 continue
 
-            topic0 = topics[0].hex() if isinstance(topics[0], bytes) else topics[0]
-
-            # NotifyReward イベントのみ処理（v1/v2 両方）
-            if topic0 not in (NOTIFY_REWARD_TOPIC, NOTIFY_REWARD_TOPIC_V1):
+            topic0 = _canonical_topic0(topics[0])
+            if not topic0 or topic0.lower() not in _NOTIFY_SIG_LO:
                 continue
 
-            # topics[2] = reward token address (indexed)
-            raw_reward_topic = topics[2].hex() if isinstance(topics[2], bytes) else topics[2]
-            reward_addr = "0x" + raw_reward_topic[-40:]
+            reward_addr = _address_from_topic(topics[2])
+            if not reward_addr:
+                continue
             reward_lower = reward_addr.lower()
 
             # ① ホワイトリストチェック（インメモリ・高速）
@@ -91,15 +180,16 @@ async def start_bribe_monitor(w3_wss: AsyncWeb3, position_manager: PositionManag
                 continue
 
             token_symbol = TOKEN_SYMBOL_MAP[reward_lower]
-            external_bribe_addr = log.get("address", "")
-            tx_hash = log.get("transactionHash", b"")
-            if isinstance(tx_hash, bytes):
-                tx_hash = tx_hash.hex()
 
-            print(
+            external_bribe_addr = _address_from_log_contract(log.get("address"))
+            if not external_bribe_addr:
+                continue
+
+            tx_hash = _tx_hash_from_log(log.get("transactionHash", b""))
+
+            safe_print(
                 f"🔔 [EventMonitor] NotifyReward 検知: {token_symbol} "
-                f"from {external_bribe_addr[:10]}... tx={tx_hash[:10]}...",
-                flush=True
+                f"from {external_bribe_addr[:10]}... tx={tx_hash[:10]}..."
             )
 
             # 以降の処理を非同期タスクで実行（イベントループをブロックしない）
@@ -112,7 +202,9 @@ async def start_bribe_monitor(w3_wss: AsyncWeb3, position_manager: PositionManag
             )
 
         except Exception as e:
-            print(f"⚠️ [EventMonitor] ログ処理エラー: {e}", flush=True)
+            import traceback
+            safe_print(f"⚠️ [EventMonitor] ログ処理エラー: {e}")
+            safe_print(traceback.format_exc())
 
 
 async def _process_bribe_event(
@@ -137,7 +229,7 @@ async def _process_bribe_event(
         # ② onchain isWhitelisted チェック
         whitelisted = await is_token_whitelisted(w3, reward_addr)
         if not whitelisted:
-            print(f"  ⛔ isWhitelisted=False: {token_symbol}", flush=True)
+            safe_print(f"  ⛔ isWhitelisted=False: {token_symbol}")
             return
 
         # Bribeトランザクションのブロックからプールアドレスを特定する
@@ -148,7 +240,7 @@ async def _process_bribe_event(
         # シミュレーターでは ExternalBrideアドレスをプールの代理として使用
         pool_address = await _resolve_pool_address(w3, external_bribe_addr)
         if not pool_address:
-            print(f"  ⚠️ プールアドレス解決失敗 bribe={external_bribe_addr[:10]}", flush=True)
+            safe_print(f"  ⚠️ プールアドレス解決失敗 bribe={external_bribe_addr[:10]}")
             return
 
         # プール基本情報を取得
@@ -166,18 +258,22 @@ async def _process_bribe_event(
         # ③ TVL チェック
         tvl_usd = await get_pool_tvl_usd(w3, pool_address, pool_info, weth_price)
         if tvl_usd < MIN_TVL_USD:
-            print(f"  ⛔ TVL不足: ${tvl_usd:,.0f} < ${MIN_TVL_USD:,.0f} ({pool_name})", flush=True)
+            safe_print(f"  ⛔ TVL不足: ${tvl_usd:,.0f} < ${MIN_TVL_USD:,.0f} ({pool_name})")
             return
 
-        # Bribeトークンのdecimalsとamountを解析
+        # Bribeトークンの decimals と amount（オンチェーン decimals で正規化）
         data_hex = log.get("data", "0x")
         bribe_amount_raw = _decode_amount(log, data_hex)
-        bribe_token_decimals = 6 if token_symbol == "USDC" else 18
+        bribe_token_decimals = await get_token_decimals(w3, reward_addr)
         bribe_amount = bribe_amount_raw / (10 ** bribe_token_decimals)
 
-        # Bribeトークンの USD価格を取得してUSD換算
-        bribe_token_price = 1.0 if token_symbol in ("USDC", "USDT") else \
-            await get_token_price_usd(w3, reward_addr, pool_address, weth_price)
+        # Bribeトークンの USD 価格（ステーブルは STABLECOIN_ADDRESSES で 1.0 近似）
+        reward_lower = reward_addr.lower()
+        bribe_token_price = (
+            1.0
+            if reward_lower in STABLECOIN_ADDRESSES
+            else await get_token_price_usd(w3, reward_addr, pool_address, weth_price)
+        )
         bribe_amount_usd = bribe_amount * bribe_token_price
 
         # ④ ターゲットトークン（非stable側）を決定して価格急騰チェック
@@ -186,8 +282,8 @@ async def _process_bribe_event(
 
         if check_price_spike(pool_address, current_price):
             reason = f"過去5分で価格が+5%以上急騰済み (現在 ${current_price:.4f})"
-            print(f"  ⛔ スパイク検出: {pool_name} {reason}", flush=True)
-            asyncio.create_task(notify_rejected(pool_name, token_symbol, reason))
+            safe_print(f"  ⛔ スパイク検出: {pool_name} {reason}")
+            await notify_rejected(pool_name, token_symbol, reason)
             return
 
         # ⑤ 希薄化チェック（weight取得）
@@ -205,23 +301,21 @@ async def _process_bribe_event(
             total_weight     = total_weight,
         )
 
-        # ポジションサイズ決定（S/A 判定もcalculate_net_ev内で実施）
+        # ポジションサイズ決定（S/A 上限は calculate_net_ev 内の T_s）
         net_ev_result = calculate_net_ev(
-            entry_score       = score,
-            trade_size_jst    = 6000.0,  # calculate_net_ev内で最終T_sを決定
-            pool_liquidity_usd = tvl_usd,
+            entry_score=score,
+            pool_liquidity_usd=tvl_usd,
         )
 
-        print(
+        safe_print(
             f"  📊 スコア={score}/100 グレード={net_ev_result.grade or 'N/A'} "
-            f"NetEV={net_ev_result.net_ev_jst:+.1f}JST 有効={net_ev_result.is_valid}",
-            flush=True
+            f"NetEV={net_ev_result.net_ev_jst:+.1f}JST 有効={net_ev_result.is_valid}"
         )
 
         if not net_ev_result.is_valid:
             reason = net_ev_result.reject_reason
-            print(f"  ⛔ エントリー棄却: {reason}", flush=True)
-            asyncio.create_task(notify_rejected(pool_name, token_symbol, reason))
+            safe_print(f"  ⛔ エントリー棄却: {reason}")
+            await notify_rejected(pool_name, token_symbol, reason)
             return
 
         # ⑦ 約定シミュレーション（遅延 + スリッページ加算）
@@ -230,7 +324,7 @@ async def _process_bribe_event(
         )
 
         if entry_price <= 0:
-            print(f"  ⚠️ エントリー価格取得失敗: {pool_name}", flush=True)
+            safe_print(f"  ⚠️ エントリー価格取得失敗: {pool_name}")
             return
 
         # ⑧ ポジション生成
@@ -247,22 +341,26 @@ async def _process_bribe_event(
             entered_at     = datetime.datetime.now(datetime.timezone.utc),
         )
 
-        # ポジションマネージャーに登録
-        position_manager.add_position(pos, target_token)
+        # Firestore 保存 → 成功時のみメモリ登録と Discord（保存失敗時は未登録のまま）
+        if not FirestoreSniperService.save_entry(pos):
+            safe_print(
+                f"⚠️ [EventMonitor] Firestore 保存失敗のためポジション未登録: {pos.position_id}",
+            )
+            return
 
-        # Firestore保存・Discord通知（非同期）
-        asyncio.create_task(
-            _save_and_notify_entry(pos, net_ev_result.net_ev_jst, delay_sec,
-                                   bribe_amount_usd, tvl_usd, score)
+        position_manager.add_position(pos, target_token)
+        await _notify_entry_discord(
+            pos, net_ev_result.net_ev_jst, delay_sec,
+            bribe_amount_usd, tvl_usd, score,
         )
 
     except Exception as e:
         import traceback
-        print(f"❌ [EventMonitor] Bribeイベント処理エラー: {e}", flush=True)
-        traceback.print_exc()
+        safe_print(f"❌ [EventMonitor] Bribeイベント処理エラー: {e}")
+        safe_print(traceback.format_exc())
 
 
-async def _save_and_notify_entry(
+async def _notify_entry_discord(
     pos: Position,
     net_ev_jst: float,
     delay_sec: float,
@@ -270,77 +368,115 @@ async def _save_and_notify_entry(
     tvl_usd: float,
     score: int,
 ) -> None:
-    """Firestore保存とDiscord通知をまとめて実行する"""
-    FirestoreSniperService.save_entry(pos)
+    """エントリー確定後の Discord 通知（保存・登録は呼び出し元で済ませている）"""
     await notify_entry(pos, net_ev_jst, delay_sec, bribe_amount_usd, tvl_usd, score)
 
 
 # 🚩 ExternalBribeアドレス → プールアドレス の既知のマッピング（主要プール用）
-# 逆引きAPIが利用できない場合のフォールバックとして使用
-KNOWN_BRIBE_TO_POOL = {
-    "0x78D1CefD2Cc5975d9e5bB10f63EAeb3B8647000d".lower(): "0xcDAc0d6c6C59727a65f871236188350531885C43", # WETH/USDC (vAMM)
-    "0x5ee1D683c3167D3a027958564D120B8888888888".lower(): "0x940181a94A35A4569E4529A3CDfB74e38FD98631", # AERO/USDC (vAMM) 等
-}
+BRIBE_MAPPING_FILE = os.path.join(os.path.dirname(__file__), "bribe_mapping.json")
 
+def _load_bribe_mapping() -> dict[str, str | None]:
+    """ファイルからマッピングを読み込む。存在しない場合は初期値を返す。"""
+    default_mapping = {
+        "0x78d1cefd2cc5975d9e5bb10f63eaeb3b8647000d": "0xcDAc0d6c6C59727a65f871236188350531885C43",
+    }
+    if not os.path.exists(BRIBE_MAPPING_FILE):
+        return default_mapping
+    try:
+        with open(BRIBE_MAPPING_FILE, "r") as f:
+            data = json.load(f)
+            # 全て小文字で正規化
+            return {k.lower(): v for k, v in data.items()}
+    except Exception as e:
+        safe_print(f"⚠️ [EventMonitor] マッピング読み込み失敗: {e}")
+        return default_mapping
+
+def _save_bribe_mapping(mapping: dict[str, str | None]):
+    """マッピングをファイルに保存する。"""
+    try:
+        with open(BRIBE_MAPPING_FILE, "w") as f:
+            json.dump(mapping, f, indent=2)
+    except Exception as e:
+        safe_print(f"⚠️ [EventMonitor] マッピング保存失敗: {e}")
+
+# 初期ロード
+KNOWN_BRIBE_TO_POOL: dict[str, str | None] = _load_bribe_mapping()
+
+_voter_scan_lock = asyncio.Lock()
 
 async def _resolve_pool_address(w3: AsyncWeb3, bribe_addr: str) -> str:
     """
-    ExternalBribeアドレスから対応するプールアドレスを解決する。
-    1. 既知のマッピングを確認（高速・確実）
-    2. Voter.gaugeToBribe の逆引き（全ゲージを検索）
-    3. ExternalBribe コントラクトの pool() / gauge() 関数を試行
+    ExternalBribeアドレスから対応するプールアドレスを解決する（完全自動メンテフリー版）。
+    1. インメモリキャッシュを最優先で確認 (負のキャッシュ含む)
+    2. Voter の登録全プールをスキャンし、Bribe を持つ Pool を探し出してキャッシュに永続化
     """
     addr_lower = bribe_addr.lower()
 
-    # ① 既知のマッピングを確認 (高速・確実)
+    # ① キャッシュの確認 (高速・確実)
     if addr_lower in KNOWN_BRIBE_TO_POOL:
-        return AsyncWeb3.to_checksum_address(KNOWN_BRIBE_TO_POOL[addr_lower])
+        val = KNOWN_BRIBE_TO_POOL[addr_lower]
+        if val is None:
+            # 過去にスキャンして見つからなかったものは即座にリターン
+            return ""
+        return AsyncWeb3.to_checksum_address(val)
 
-    # ② Voter.poolForGauge を経由した逆引きを試行
-    try:
-        voter = w3.eth.contract(
-            address=AsyncWeb3.to_checksum_address(AERODROME_VOTER_ADDRESS),
-            abi=VOTER_ABI
-        )
-        # ExternalBribe コントラクトが gauge() 関数を持っている場合に試みる
-        gauge_abi = [{"inputs": [], "name": "gauge",
-                      "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-                      "stateMutability": "view", "type": "function"}]
-        bribe_contract = w3.eth.contract(
-            address=AsyncWeb3.to_checksum_address(bribe_addr),
-            abi=gauge_abi
-        )
+    # ② 初回未知のBribeが来た場合のみ、Voterからプール全件スキャンを実施(Auto-Mapping)
+    async with _voter_scan_lock:
+        # ロック待ちの間に別のタスクが解決しているかもしれないので再度確認
+        if addr_lower in KNOWN_BRIBE_TO_POOL:
+            val = KNOWN_BRIBE_TO_POOL[addr_lower]
+            return AsyncWeb3.to_checksum_address(val) if val else ""
+
+        safe_print(f"  🔍 未知のBribe ({bribe_addr[:10]}) を検知。Voterの全台帳を自動スキャンして追跡します...")
+        found_target = False
         try:
-            gauge_addr = await bribe_contract.functions.gauge().call()
-            pool = await voter.functions.poolForGauge(gauge_addr).call()
-            if pool and pool != "0x0000000000000000000000000000000000000000":
-                print(f"  ✅ Voter.poolForGauge 経由でプール特定: {pool[:10]}...", flush=True)
-                return pool
-        except Exception:
-            pass
+            voter = w3.eth.contract(
+                address=AsyncWeb3.to_checksum_address(AERODROME_VOTER_ADDRESS),
+                abi=[
+                    {"inputs": [], "name": "length", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
+                    {"inputs": [{"type": "uint256"}], "name": "pools", "outputs": [{"type": "address"}], "stateMutability": "view", "type": "function"},
+                    {"inputs": [{"type": "address"}], "name": "gauges", "outputs": [{"type": "address"}], "stateMutability": "view", "type": "function"},
+                    {"inputs": [{"type": "address"}], "name": "external_bribes", "outputs": [{"type": "address"}], "stateMutability": "view", "type": "function"}
+                ]
+            )
+            
+            length = await voter.functions.length().call()
+            # 最新のプールから逆順に探す (新規Bribeほど新しいプールの確率が高いため)
+            for i in range(length - 1, -1, -1):
+                try:
+                    pool = await voter.functions.pools(i).call()
+                    if not pool or pool == "0x0000000000000000000000000000000000000000": continue
+                    
+                    gauge = await voter.functions.gauges(pool).call()
+                    if not gauge or gauge == "0x0000000000000000000000000000000000000000": continue
+                    
+                    ext_bribe = await voter.functions.external_bribes(gauge).call()
+                    if ext_bribe:
+                        ext_lower = ext_bribe.lower()
+                        # 副産物としてスキャンできたものも全てキャッシュに学習させておく
+                        if ext_lower not in KNOWN_BRIBE_TO_POOL:
+                            KNOWN_BRIBE_TO_POOL[ext_lower] = pool
+                        
+                        if ext_lower == addr_lower:
+                            safe_print(f"  ✅ 自動マッピング完了: {ext_bribe[:10]} -> Pool {pool[:10]}")
+                            found_target = True
+                except Exception:
+                    continue
+            
+            # 全件スキャン後、ファイルに保存
+            _save_bribe_mapping(KNOWN_BRIBE_TO_POOL)
+            
+        except Exception as e:
+            safe_print(f"  ⚠️ Voterスキャン中にエラー発生: {e}")
 
-    except Exception:
-        pass
+        if not found_target:
+            # 負のキャッシュに登録 (None を入れる)
+            KNOWN_BRIBE_TO_POOL[addr_lower] = None
+            _save_bribe_mapping(KNOWN_BRIBE_TO_POOL)
+            safe_print(f"  ⚠️ プールアドレス完全解決不能 bribe={bribe_addr[:10]} (負のキャッシュに登録しました)")
 
-    # ③ ExternalBribe コントラクトの pool() を直接試みる
-    try:
-        pool_abi_minimal = [
-            {"inputs": [], "name": "pool",
-             "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-             "stateMutability": "view", "type": "function"},
-        ]
-        bribe_contract = w3.eth.contract(
-            address=AsyncWeb3.to_checksum_address(bribe_addr),
-            abi=pool_abi_minimal
-        )
-        pool = await bribe_contract.functions.pool().call()
-        if pool and pool != "0x0000000000000000000000000000000000000000":
-            return pool
-    except Exception:
-        pass
-
-    print(f"  ⚠️ プールアドレス解決失敗 bribe={bribe_addr[:10]}", flush=True)
-    return ""
+    val = KNOWN_BRIBE_TO_POOL.get(addr_lower)
+    return AsyncWeb3.to_checksum_address(val) if val else ""
 
 
 def _decode_amount(log: dict, data_hex: str) -> int:

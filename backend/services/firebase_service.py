@@ -3,6 +3,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 import os
+from sniper.safe_io import safe_print
 
 class FirebaseConfig:
     _instance = None
@@ -20,9 +21,9 @@ class FirebaseConfig:
                     cls._instance.app = firebase_admin.initialize_app(cred)
                 except ValueError:
                     cls._instance.app = firebase_admin.get_app()
-                print("✅ Firebase Admin SDK 初期化成功 (Firestore)")
+                safe_print("✅ Firebase Admin SDK 初期化成功 (Firestore)")
             except Exception as e:
-                print(f"❌ Firebase初期化エラー: {e}")
+                safe_print(f"❌ Firebase初期化エラー: {e}")
         return cls._instance
 
 class FirebaseService:
@@ -57,9 +58,9 @@ class FirebaseService:
                 "ai_summary": ai_summary,
                 "status": "pending" 
             })
-            print(f"✨ [Firestore] T=0 記録保存完了: {tx_hash[:10]}", flush=True)
+            safe_print(f"✨ [Firestore] T=0 記録保存完了: {tx_hash[:10]}")
         except Exception as e:
-            print(f"❌ [Firestore] T=0 保存エラー: {e}", flush=True)
+            safe_print(f"❌ [Firestore] T=0 保存エラー: {e}")
 
     @classmethod
     def update_simulation_t48(cls, tx_hash: str, t48_price: float):
@@ -78,11 +79,11 @@ class FirebaseService:
                     "simulated_pnl": pnl,
                     "status": "executed"
                 })
-                print(f"✅ [Firestore] T+48 シミュレーション完了 PnL: {pnl:.2f}%", flush=True)
+                safe_print(f"✅ [Firestore] T+48 シミュレーション完了 PnL: {pnl:.2f}%")
                 return pnl, t0_price
             return None, None
         except Exception as e:
-            print(f"❌ [Firestore] T+48 更新エラー: {e}", flush=True)
+            safe_print(f"❌ [Firestore] T+48 更新エラー: {e}")
             return None, None
 
     @classmethod
@@ -106,7 +107,7 @@ class FirebaseService:
                     stats["total"]["wins"] += 1
             return stats
         except Exception as e:
-            print(f"❌ [Firestore] 統計取得エラー: {e}", flush=True)
+            safe_print(f"❌ [Firestore] 統計取得エラー: {e}")
             return None
 
     @classmethod
@@ -121,7 +122,7 @@ class FirebaseService:
                 events.append({"timestamp": str(data.get("timestamp")), "method_id": data.get("method_id"), "ai_rank": data.get("ai_rank"), "ai_score": data.get("ai_score")})
             return events
         except Exception as e:
-            print(f"⚠️ 過去ログ取得エラー: {e}", flush=True)
+            safe_print(f"⚠️ 過去ログ取得エラー: {e}")
             return []
 
     @classmethod
@@ -135,6 +136,6 @@ class FirebaseService:
                 doc.reference.delete()
                 deleted_count += 1
             if deleted_count > 0:
-                print(f"🧹 [Firestore] 古い記録を {deleted_count} 件削除しました。")
+                safe_print(f"🧹 [Firestore] 古い記録を {deleted_count} 件削除しました。")
         except Exception as e:
-            print(f"⚠️ データベース清掃エラー: {e}", flush=True)
+            safe_print(f"⚠️ データベース清掃エラー: {e}")

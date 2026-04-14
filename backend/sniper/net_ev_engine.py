@@ -73,11 +73,11 @@ def calculate_entry_score(
 
 def calculate_net_ev(
     entry_score: int,
-    trade_size_jst: float,
     pool_liquidity_usd: float,
 ) -> NetEVResult:
     """
     NetEV（純期待値）を仕様書の計算式に基づいて算出する。
+    ポジションサイズ T_s はスコアに応じた S/A 上限（MAX_POSITION_SIZE_*）から決まる。
 
     NetEV = (E_r × T_s) - S_c - (G_c × 2)
       E_r = (EntryScore / 100) × 0.20

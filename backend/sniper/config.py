@@ -6,30 +6,26 @@ from __future__ import annotations
 
 import os
 import sys
+from sniper.safe_io import safe_print
 
 # 親ディレクトリをパスに追加（config/settings.py を参照するため）
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from dotenv import load_dotenv
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ModuleNotFoundError:
+    safe_print("⚠️ python-dotenv が未インストールのため .env 自動読込をスキップします。")
 
 # ==========================================
 # 🌐 RPC エンドポイント
 # ==========================================
-ALCHEMY_BASE_WSS_URL = os.getenv(
-    "ALCHEMY_BASE_WSS_URL",
-    "wss://base-mainnet.g.alchemy.com/v2/lcau4KV3k-6quLk___bH2"
-)
-ALCHEMY_BASE_HTTP_URL = os.getenv(
-    "ALCHEMY_BASE_HTTP_URL",
-    "https://base-mainnet.g.alchemy.com/v2/lcau4KV3k-6quLk___bH2"
-)
+ALCHEMY_BASE_WSS_URL = os.getenv("ALCHEMY_BASE_WSS_URL")
+ALCHEMY_BASE_HTTP_URL = os.getenv("ALCHEMY_BASE_HTTP_URL")
 
 # Discord の Webhook URL
-DISCORD_WEBHOOK_URL = os.getenv(
-    "DISCORD_WEBHOOK_URL",
-    "https://discord.com/api/webhooks/1489222489207996571/VJiupsBzmet54AZTscv_6NiUVuun92tALLOUZUVOEvOjaZAW7KI80LkFAYUWGs1d3UtG"
-)
+DISCORD_WEBHOOK_URL = os.getenv("BRIBE_WEBHOOK_URL")
+
 
 # ==========================================
 # 🔗 Aerodrome コントラクトアドレス (Base Chain)
@@ -52,13 +48,13 @@ WHITELISTED_TOKENS: dict[str, str] = {
     "DEGEN":  "0x4ed4E862860beD51a9570b96d89aAf5E1B0Efefed",
     "WELL":   "0xA88594D404727625A9437C3f886C7643872296AE",
     "SNX":    "0x22e6966B799c4D5B13BE962E1D117b56327FDa66",
-    "LINK":   "0x514910771AF9Ca656af840dff83E8264EcF986CA",
+    "LINK":   "0x88Fb150BDc53A65fe94Dea0c9BA0a6dAf8C6e196",  # Base Chain
     # 追加 (10個)
     "PYUSD":  "0x8b175474E8062F03f98235Af4061f301C91Be582",  # PayPal USD
     "USDbC":  "0xd9aaEC86B65D86f6A7B5B1B0C42FFA531710b6CA",  # Bridged USDC
     "DAI":    "0x50c5725949A6F0C72E6C4a641f24049a917DB0CB",  # DAI
     "EURC":   "0x1abaea1f7c830fed89f2532441e15AC2a061263d",  # Euro Coin
-    "ezETH":  "0x2416092519515151515151515151515151515151",  # ezETH (Placeholder Check Needed)
+    "ezETH":  "0x2416092f143378750bb29b79ed961ab195cceea5",  # Renzo ezETH (Base)
     "weETH":  "0x04C066422FBD43480184942c3C83D818aba10758",  # weETH
     "rsETH":  "0xab57D6BB1349fF1626db86D3380B2256E2a2A88a",  # rsETH
     "clAERO": "0x403d1596700c25d888f21E5336d3c8c7B34638De",  # Concentrated AERO
@@ -76,11 +72,14 @@ TOKEN_SYMBOL_MAP: dict[str, str] = {
     addr.lower(): sym for sym, addr in WHITELISTED_TOKENS.items()
 }
 
-# Stablecoinアドレス（USD価格 = 1.0 として扱う）
+# Stablecoinアドレス（USD 1.0 相当として扱う。EURC/LUSD はシミュレーション上の近似）
 STABLECOIN_ADDRESSES: set[str] = {
     "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",  # USDC
-    "0x50c5725949a6f0c72e6c4a641f24049a917db0cb",  # DAI on Base
+    "0x50c5725949a6f0c72e6c4a641f24049a917db0cb",  # DAI
     "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",  # USDbC
+    "0x8b175474e8062f03f98235af4061f301c91be582",  # PYUSD
+    "0x1abaea1f7c830fed89f2532441e15ac2a061263d",  # EURC
+    "0xed8880004990a2e2a661556a3ecc8ef477960714",  # LUSD
 }
 
 WETH_ADDRESS = "0x4200000000000000000000000000000000000006"

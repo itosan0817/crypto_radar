@@ -13,6 +13,7 @@ from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 
 from sniper.models import Position, ExitRecord
+from sniper.safe_io import safe_print
 
 # serviceAccountKey.json のパスを解決
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -33,9 +34,9 @@ class _FirestoreClient:
                     cred = credentials.Certificate(_SERVICE_ACCOUNT_PATH)
                     firebase_admin.initialize_app(cred)
                 cls._db = firestore.client()
-                print("✅ [FirestoreSniper] Firestore 接続成功", flush=True)
+                safe_print("✅ [FirestoreSniper] Firestore 接続成功")
             except Exception as e:
-                print(f"❌ [FirestoreSniper] Firestore 初期化失敗: {e}", flush=True)
+                safe_print(f"❌ [FirestoreSniper] Firestore 初期化失敗: {e}")
                 raise
         return cls._db
 
@@ -73,10 +74,10 @@ class FirestoreSniperService:
                 "realized_pnl_jst": pos.realized_pnl_jst,
                 "gas_cost_total_jst": pos.gas_cost_total_jst,
             })
-            print(f"✨ [FirestoreSniper] エントリー保存: {pos.position_id}", flush=True)
+            safe_print(f"✨ [FirestoreSniper] エントリー保存: {pos.position_id}")
             return True
         except Exception as e:
-            print(f"❌ [FirestoreSniper] エントリー保存失敗: {e}", flush=True)
+            safe_print(f"❌ [FirestoreSniper] エントリー保存失敗: {e}")
             return False
 
     # ────────────────────────────────────────
@@ -113,7 +114,7 @@ class FirestoreSniperService:
             })
             return True
         except Exception as e:
-            print(f"❌ [FirestoreSniper] 決済記録失敗 {pos.position_id}: {e}", flush=True)
+            safe_print(f"❌ [FirestoreSniper] 決済記録失敗 {pos.position_id}: {e}")
             return False
 
     # ────────────────────────────────────────
@@ -182,7 +183,7 @@ class FirestoreSniperService:
 
             return stats
         except Exception as e:
-            print(f"❌ [FirestoreSniper] 週次統計取得失敗: {e}", flush=True)
+            safe_print(f"❌ [FirestoreSniper] 週次統計取得失敗: {e}")
             return {}
 
     @classmethod
@@ -197,8 +198,13 @@ class FirestoreSniperService:
             )
             return [doc.id for doc in docs]
         except Exception as e:
-            print(f"⚠️ [FirestoreSniper] アクティブポジション取得失敗: {e}", flush=True)
+            safe_print(f"⚠️ [FirestoreSniper] アクティブポジション取得失敗: {e}")
             return []
+
+    @classmethod
+    async def record_exit_async(cls, pos: "Position", exit_rec: "ExitRecord") -> bool:
+        """record_exit の非同期ラッパー（asyncio.create_task から呼び出し可能）"""
+        return cls.record_exit(pos, exit_rec)
 
 
 def _calc_max_drawdown(pnls: list[float]) -> float:
@@ -216,12 +222,6 @@ def _calc_max_drawdown(pnls: list[float]) -> float:
         if dd > max_dd:
             max_dd = dd
     return max_dd
-
-
-    @classmethod
-    async def record_exit_async(cls, pos: "Position", exit_rec: "ExitRecord") -> bool:
-        """record_exit の非同期ラッパー（asyncio.create_task から呼び出し可能）"""
-        return cls.record_exit(pos, exit_rec)
 
 
 def _calc_profit_factor(pnls: list[float]) -> float:

@@ -2,6 +2,7 @@ import datetime
 import requests
 import pytz
 from config.settings import DISCORD_WEBHOOK_URL, TZ_JST
+from sniper.safe_io import safe_print
 
 class DiscordService:
     """
@@ -23,9 +24,9 @@ class DiscordService:
         try:
             response = requests.post(DISCORD_WEBHOOK_URL, json=data)
             if response.status_code not in (200, 204):
-                print(f"❌ Discord通知送信失敗: {response.status_code}")
+                safe_print(f"❌ Discord通知送信失敗: {response.status_code}")
         except Exception as e:
-            print(f"❌ Discord接続エラー: {e}")
+            safe_print(f"❌ Discord接続エラー: {e}")
 
     @classmethod
     def send_t0_entry_notification(cls, contract_addr: str, tx_hash: str, t0_price: float, slippage: float, ai_rank: str, ai_score: int, ai_summary: str):
@@ -167,6 +168,41 @@ class DiscordService:
             "description": f"プログラムの実行中に致命的なエラーが発生しました。ログを確認してください。\n```python\n{error_msg}\n```",
             "color": 0xFF0000,
             "footer": {"text": f"発生時刻: {now_jst_str}"},
+            "timestamp": now_utc.isoformat()
+        }
+        cls._send_embed(embed)
+
+    @classmethod
+    def send_startup_notification(cls):
+        """起動確認用の通知を送信する"""
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        now_jst_str = cls._format_jst(now_utc)
+        
+        embed = {
+            "title": "✅ Aerodrome Radar 起動",
+            "description": "Baseチェーン監視網（シミュレーター極）プロセスが正常に起動しました。",
+            "color": 0x00FFFF,
+            "footer": {"text": f"起動時刻: {now_jst_str}"},
+            "timestamp": now_utc.isoformat()
+        }
+        cls._send_embed(embed)
+
+    @classmethod
+    def send_health_check(cls):
+        """毎日定例の健康診断通知を報告する"""
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        now_jst_str = cls._format_jst(now_utc)
+        
+        embed = {
+            "title": "📡 定例システム健康診断報告 | Aerodrome Radar",
+            "description": "24時間稼働の死活監視チェックが完了しました。現在すべてのシステムは正常に Blockchain を監視中です。",
+            "color": 0x27ae60, # 鮮やかな緑
+            "fields": [
+                {"name": "🛰️ 稼働プロセス", "value": "🟢 Aerodrome Radar (Main Loop)", "inline": True},
+                {"name": "⏳ 監視状況", "value": "🟢 正常 (Listening...)", "inline": True},
+                {"name": "🗓️ 最終確認時刻", "value": f"`{now_jst_str}`", "inline": False}
+            ],
+            "footer": {"text": "Crypto Radar 極 | 24/7 Monitoring System"},
             "timestamp": now_utc.isoformat()
         }
         cls._send_embed(embed)

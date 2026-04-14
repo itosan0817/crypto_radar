@@ -1,0 +1,31 @@
+{
+  "quote": 9993.397205464855,
+  "side": 0,
+  "entry_px": 71161.32942000001,
+  "qty": 0.0,
+  "tp": 71310.95742,
+  "sl": 71011.70142000001,
+  "entry_i": 2045,
+  "pending": 1,
+  "consecutive_losses": 1,
+  "cooldown_first_allowed_i": 0,
+  "halt_new_entries": false,
+  "day_utc": "2026-04-13",
+  "quote_at_day_start": 10000.0,
+  "daily_pnl": -6.602794535144506,
+  "last_m15_open_time": 1776087000000,
+  "hourly_pnls_buffer": [
+    -6.602794535144506
+  ],
+  "day_pnls_buffer": [
+    -6.602794535144506
+  ],
+  "hourly_new_bars": 2,
+  "hourly_signal_count": 2,
+  "hourly_reason_counts": {
+    "emit_long": 2
+  },
+  "last_hour_key": "2026-04-13-13",
+  "last_day_key": "2026-04-13",
+  "initialized": true
+}

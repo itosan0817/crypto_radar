@@ -1,23 +1,26 @@
 import os
-from dotenv import load_dotenv
+from sniper.safe_io import safe_print
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:
+    load_dotenv = None
 
 # .envファイルがあれば読み込む
-load_dotenv()
+if load_dotenv is not None:
+    load_dotenv()
+else:
+    safe_print("⚠️ python-dotenv が未インストールのため .env 自動読込をスキップします。")
 
 # ==========================================
 # ⚙️ 基本設定 (RPC, API Keys)
 # ==========================================
-ALCHEMY_BASE_WSS_URL = os.getenv("ALCHEMY_BASE_WSS_URL", "wss://base-mainnet.g.alchemy.com/v2/lcau4KV3k-6quLk___bH2")
-
-# フォールバック用パブリックRPC (例)
+ALCHEMY_BASE_WSS_URL = os.getenv("ALCHEMY_BASE_WSS_URL")
 FALLBACK_BASE_WSS_URL = os.getenv("FALLBACK_BASE_WSS_URL", "wss://base-rpc.publicnode.com")
 
-DISCORD_WEBHOOK_URL = os.getenv(
-    "DISCORD_WEBHOOK_URL", 
-    "https://discord.com/api/webhooks/1486024387235807363/5uOvGnnf61kMLboYSKJwYbnHgohr3ebaTna1e4fqdaDrQVGxrnTx49ucZFt0xam1x2K8"
-)
+DISCORD_WEBHOOK_URL = os.getenv("RADAR_WEBHOOK_URL")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyCaJIQoweH2qpnJCg-zb7wzg4n6iuBuTS8")
+
 
 # ==========================================
 # 🎯 デプロイメント・ターゲット情報

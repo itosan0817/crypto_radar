@@ -11,18 +11,19 @@ from web3 import AsyncWeb3, AsyncHTTPProvider
 from sniper.config import ALCHEMY_BASE_HTTP_URL, WHITELISTED_TOKENS, JST_PER_USD
 from sniper.event_monitor import _process_bribe_event, NOTIFY_REWARD_TOPIC
 from sniper.position_manager import PositionManager
+from sniper.safe_io import safe_print
 
 async def run_sniper_test():
     """
     Bribe Sniper の疑似イベント・テストシナリオ
     高額な Bribe が入金されたと仮定して、システムを強制的に発火させます。
     """
-    print("🚀 [TEST] Bribe Sniper 疑似イベント・シナリオテストを開始します...")
+    safe_print("🚀 [TEST] Bribe Sniper 疑似イベント・シナリオテストを開始します...")
 
     # 1. Web3 接続 (HTTP)
     w3 = AsyncWeb3(AsyncHTTPProvider(ALCHEMY_BASE_HTTP_URL))
     if not await w3.is_connected():
-        print("❌ Alchemy接続失敗。テストを中断します。")
+        safe_print("❌ Alchemy接続失敗。テストを中断します。")
         return
 
     # 2. PositionManager の初期化 (テスト用)
@@ -57,9 +58,9 @@ async def run_sniper_test():
         'blockNumber': 1000000,
     }
 
-    print(f"\n🧪 STEP 1: {target_pool_name} への {bribe_token_symbol} Bribe 入金検知テスト...")
-    print(f"   入金トークン: {bribe_token_addr}")
-    print(f"   Bribeコントラクト: {external_bribe_addr}")
+    safe_print(f"\n🧪 STEP 1: {target_pool_name} への {bribe_token_symbol} Bribe 入金検知テスト...")
+    safe_print(f"   入金トークン: {bribe_token_addr}")
+    safe_print(f"   Bribeコントラクト: {external_bribe_addr}")
     
     try:
         await _process_bribe_event(
@@ -72,12 +73,12 @@ async def run_sniper_test():
             mock_log['transactionHash'].hex()
         )
     except Exception as e:
-        print(f"❌ テスト実行エラー: {e}")
+        safe_print(f"❌ テスト実行エラー: {e}")
         import traceback
-        traceback.print_exc()
+        safe_print(traceback.format_exc())
 
-    print("\n✅ [TEST] シナリオ投入完了。")
-    print("📱 Discordのアラートと、Firestoreの 'bribe_positions' コレクションを確認してください。")
+    safe_print("\n✅ [TEST] シナリオ投入完了。")
+    safe_print("📱 Discordのアラートと、Firestoreの 'bribe_positions' コレクションを確認してください。")
 
 if __name__ == "__main__":
     asyncio.run(run_sniper_test())

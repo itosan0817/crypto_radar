@@ -1,0 +1,106 @@
+use_runtime_params: true
+symbol: BTCUSDT
+base_url: https://fapi.binance.com
+
+intervals:
+  signal: 15m
+  features:
+    - 15m
+    - 1h
+    - 4h
+    - 1d
+
+data:
+  cache_sqlite: data/btc_klines.sqlite
+
+regression:
+  lookback_bars:
+    m15: 96
+    "1h": 72
+    "4h": 60
+    "1d": 60
+
+pattern:
+  window: 32
+  top_k: 12
+  min_similarity: 0.15
+  horizon_bars: 4
+
+model:
+  forward_bars: 4
+  train_min_samples: 100
+  calibration: platt
+
+combine:
+  weight_model: 0.55
+  weight_pattern: 0.45
+  entry_threshold: 0.18
+
+filters:
+  enabled: true
+  min_confidence: 0.12
+  mtf_align_1h: true
+  agreement_required: true
+  atr_period: 14
+  atr_low_quantile: 0.05
+  atr_high_quantile: 0.97
+  expectancy_gate: true
+  taker_fee_rate: 0.0004
+  slippage_bps: 2.0
+
+risk:
+  tp_atr_mult: 1.8
+  sl_atr_mult: 1.2
+  max_hold_bars: 48
+  position_fraction: 0.98
+  max_daily_loss_pct: 0.05
+  cooldown_after_losses: 3
+  cooldown_bars: 8
+  # 0 = off. After favorable move of this many ATRs, move stop to breakeven (entry).
+  trail_breakeven_atr_mult: 0.0
+  confidence_tier:
+    enabled: true
+    # conf <= thresholds[i] uses row i (first match). Tiers from low to high conf.
+    thresholds: [0.18, 0.28, 1.01]
+    position_fraction: [0.4, 0.7, 0.98]
+    tp_atr_mult_scale: [0.95, 1.0, 1.05]
+    sl_atr_mult_scale: [1.05, 1.0, 0.95]
+    max_hold_bars_scale: [0.85, 1.0, 1.0]
+
+backtest:
+  initial_quote: 10000.0
+  funding_rate_per_8h: 0.0
+
+walk_forward:
+  train_bars: 8000
+  test_bars: 1500
+  embargo_bars: 500
+  step_bars: 1500
+  grid:
+    tp_atr_mult: [1.4, 1.8, 2.2]
+    sl_atr_mult: [1.0, 1.2, 1.5]
+    weight_model: [0.45, 0.55, 0.65]
+    entry_threshold: [0.14, 0.18, 0.22]
+    min_confidence: [0.08, 0.12, 0.16]
+
+paper:
+  poll_seconds: 30
+  timezone: Asia/Tokyo
+  train_window_bars: 5000
+  state_path: data/paper_state.json
+  reload_runtime_params_seconds: 300
+
+tune:
+  min_test_trades: 5
+  min_profit_factor: 0.0
+  skip_if_worse_than_current: true
+  score_weights:
+    pnl: 1.0
+    drawdown_penalty: 0.5
+    profit_factor_bonus: 50.0
+
+# `python -m btc_paper_trader tune` が data/runtime_params.json を上書き。
+# 次回起動時 load_config が risk / combine / filters をマージする。
+
+logging:
+  jsonl_path: data/paper_events.jsonl

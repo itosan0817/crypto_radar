@@ -1,0 +1,30 @@
+{
+  "updated_at": "2026-04-13T03:05:23.318690+00:00",
+  "source": "tune_last_window",
+  "train_range": [
+    216,
+    1547
+  ],
+  "test_range": [
+    1751,
+    1998
+  ],
+  "best_score": -193.30784576755372,
+  "test_summary": {
+    "n_trades": 6,
+    "win_rate": 0.16666666666666666,
+    "profit_factor": 0.43786236002564116,
+    "expectancy": -17.11533827145506,
+    "total_pnl": -102.69202962873037,
+    "max_drawdown": -0.01812316322776467,
+    "calmar_like": -0.5666341374192656
+  },
+  "risk": {
+    "tp_atr_mult": 1.8,
+    "sl_atr_mult": 1.0
+  },
+  "combine": {
+    "weight_model": 0.65,
+    "weight_pattern": 0.35
+  }
+}
