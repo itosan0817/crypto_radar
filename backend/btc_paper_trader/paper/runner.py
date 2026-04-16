@@ -59,12 +59,28 @@ def _reason_ja(reason: str) -> str:
     mapping = {
         "emit_long": "ロング条件成立",
         "emit_short": "ショート条件成立",
+        "emit_long_grid": "レンジ逆張りロング成立",
+        "emit_short_grid": "レンジ逆張りショート成立",
+        "grid_center_deadband": "レンジ中心帯で見送り",
+        "grid_wait_band": "レンジ待機帯",
+        "grid_disabled": "グリッド無効",
+        "grid_data_unavailable": "グリッド判定データ不足",
+        "range_breakout_guard": "ボラ急拡大でレンジ停止",
+        "entry_timing_1m_data_unavailable": "1分足データ不足で見送り",
+        "entry_timing_1m_trend_long_block": "1分足条件不足でトレンドロング見送り",
+        "entry_timing_1m_trend_short_block": "1分足条件不足でトレンドショート見送り",
+        "entry_timing_1m_range_long_block": "1分足条件不足でレンジロング見送り",
+        "entry_timing_1m_range_short_block": "1分足条件不足でレンジショート見送り",
+        "entry_timing_skipped_regime": "1分足フィルタ対象外レジーム（即時約定）",
         "score_below_threshold": "スコア不足",
         "low_confidence": "確信度不足",
         "model_pattern_disagree": "モデルとパターン不一致",
         "mtf_align_block": "上位足トレンド不一致",
         "atr_out_of_range": "値動き幅が条件外",
         "expectancy_gate_block": "期待値フィルターで除外",
+        "funding_long_block": "Funding過熱でロング除外",
+        "funding_short_block": "Funding過熱でショート除外",
+        "news_event_block": "ニュース時間帯で新規停止",
         "risk_guard_block": "リスク制限で新規停止",
         "hold_position": "保有中のため新規なし",
         "position_open": "保有中",
@@ -93,7 +109,10 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
         entry_i=int(raw.get("entry_i", 0)),
         pending=int(raw.get("pending", 0)),
         pending_confidence=float(raw.get("pending_confidence", 0.0)),
+        pending_regime=str(raw.get("pending_regime", "trend")),
         entry_max_hold_bars=int(raw.get("entry_max_hold_bars", 0)),
+        entry_atr=float(raw.get("entry_atr", 0.0)),
+        partial_tp_done=bool(raw.get("partial_tp_done", False)),
         breakeven_done=bool(raw.get("breakeven_done", False)),
         consecutive_losses=int(raw.get("consecutive_losses", 0)),
         cooldown_first_allowed_i=int(raw.get("cooldown_first_allowed_i", 0)),
@@ -110,6 +129,10 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
     hourly_new_bars = int(raw.get("hourly_new_bars", 0))
     hourly_signal_count = int(raw.get("hourly_signal_count", 0))
     hourly_reason_counts: dict[str, int] = dict(raw.get("hourly_reason_counts", {}))
+    hourly_short_signal_count = int(raw.get("hourly_short_signal_count", 0))
+    hourly_short_blocked_count = int(raw.get("hourly_short_blocked_count", 0))
+    hourly_short_block_reasons: dict[str, int] = dict(raw.get("hourly_short_block_reasons", {}))
+    hourly_regime_counts: dict[str, int] = dict(raw.get("hourly_regime_counts", {}))
 
     last_processed_ot = 0
     cached_df = None
@@ -170,8 +193,19 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
             for e in events:
                 if e.get("type") == "decision":
                     hourly_signal_count += 1
+                    signal = int(e.get("signal", 0))
+                    pending_after_guard = int(e.get("pending_after_guard", 0))
                     reason = str(e.get("reason", "unknown"))
+                    regime = str(e.get("regime", "unknown"))
                     hourly_reason_counts[reason] = hourly_reason_counts.get(reason, 0) + 1
+                    hourly_regime_counts[regime] = hourly_regime_counts.get(regime, 0) + 1
+                    if signal == -1:
+                        hourly_short_signal_count += 1
+                        if pending_after_guard == 0:
+                            hourly_short_blocked_count += 1
+                            hourly_short_block_reasons[reason] = (
+                                hourly_short_block_reasons.get(reason, 0) + 1
+                            )
                     continue
                 if "pnl" in e:
                     p = float(e["pnl"])
@@ -202,12 +236,25 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
             summ = summarize_trades(list(hourly_pnls), cfg["backtest"]["initial_quote"])
             top_reasons = sorted(hourly_reason_counts.items(), key=lambda x: x[1], reverse=True)[:3]
             reason_text = ", ".join([f"{_reason_ja(k)}:{v}" for k, v in top_reasons]) if top_reasons else "なし"
+            top_short_block_reasons = sorted(
+                hourly_short_block_reasons.items(), key=lambda x: x[1], reverse=True
+            )[:3]
+            short_block_text = (
+                ", ".join([f"{_reason_ja(k)}:{v}" for k, v in top_short_block_reasons])
+                if top_short_block_reasons
+                else "なし"
+            )
+            regime_text = ", ".join([f"{k}:{v}" for k, v in sorted(hourly_regime_counts.items())]) or "なし"
             post_hourly_summary(
                 f"実現PnL合計: {summ['total_pnl']:.2f} / 取引数 {summ['n_trades']} / 勝率 {summ['win_rate']:.2%} / PF {summ['profit_factor']:.2f}",
                 fields=[
                     {"name": "新しいバー数", "value": f"{hourly_new_bars}", "inline": True},
                     {"name": "シグナル数", "value": f"{hourly_signal_count}", "inline": True},
+                    {"name": "レジーム内訳", "value": regime_text[:1000], "inline": False},
                     {"name": "主な理由", "value": reason_text[:1000], "inline": False},
+                    {"name": "ショート候補シグナル数", "value": f"{hourly_short_signal_count}", "inline": True},
+                    {"name": "ショート阻止数", "value": f"{hourly_short_blocked_count}", "inline": True},
+                    {"name": "ショート阻止の主因", "value": short_block_text[:1000], "inline": False},
                     {"name": "1取引あたり期待損益", "value": f"{summ['expectancy']:.4f}", "inline": True},
                     {"name": "最大ドローダウン", "value": f"{summ['max_drawdown']:.4f}", "inline": True},
                     {"name": "平均利益", "value": f"{summ.get('avg_win', 0):.4f}", "inline": True},
@@ -220,6 +267,10 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
             hourly_new_bars = 0
             hourly_signal_count = 0
             hourly_reason_counts = {}
+            hourly_short_signal_count = 0
+            hourly_short_blocked_count = 0
+            hourly_short_block_reasons = {}
+            hourly_regime_counts = {}
 
         if last_day_key is not None and day_key != last_day_key:
             summ_d = summarize_trades(list(day_pnls), cfg["backtest"]["initial_quote"])
@@ -251,7 +302,10 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
                 "entry_i": sim.entry_i,
                 "pending": sim.pending,
                 "pending_confidence": sim.pending_confidence,
+                "pending_regime": sim.pending_regime,
                 "entry_max_hold_bars": sim.entry_max_hold_bars,
+                "entry_atr": sim.entry_atr,
+                "partial_tp_done": sim.partial_tp_done,
                 "breakeven_done": sim.breakeven_done,
                 "consecutive_losses": sim.consecutive_losses,
                 "cooldown_first_allowed_i": sim.cooldown_first_allowed_i,
@@ -265,6 +319,10 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
                 "hourly_new_bars": hourly_new_bars,
                 "hourly_signal_count": hourly_signal_count,
                 "hourly_reason_counts": hourly_reason_counts,
+                "hourly_short_signal_count": hourly_short_signal_count,
+                "hourly_short_blocked_count": hourly_short_blocked_count,
+                "hourly_short_block_reasons": hourly_short_block_reasons,
+                "hourly_regime_counts": hourly_regime_counts,
                 "last_hour_key": last_hour_key,
                 "last_day_key": last_day_key,
                 "initialized": True,

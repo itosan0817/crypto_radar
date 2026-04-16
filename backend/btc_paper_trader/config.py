@@ -40,6 +40,34 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return out
 
 
+def _runtime_params_acceptable(rt: dict[str, Any], cfg: dict[str, Any]) -> bool:
+    """
+    Avoid applying clearly bad tuned params to live paper trading.
+    If test_summary is missing, keep backward compatibility and allow merge.
+    """
+    ts = rt.get("test_summary")
+    if not isinstance(ts, dict):
+        return True
+
+    guard = cfg.get("runtime_guard") or {}
+    min_trades = int(guard.get("min_trades", 8))
+    min_pf = float(guard.get("min_profit_factor", 1.05))
+    min_wr = float(guard.get("min_win_rate", 0.45))
+    min_expectancy = float(guard.get("min_expectancy", 0.0))
+
+    n_trades = int(ts.get("n_trades", 0) or 0)
+    pf = float(ts.get("profit_factor", 0.0) or 0.0)
+    win_rate = float(ts.get("win_rate", 0.0) or 0.0)
+    expectancy = float(ts.get("expectancy", 0.0) or 0.0)
+
+    return (
+        n_trades >= min_trades
+        and pf >= min_pf
+        and win_rate >= min_wr
+        and expectancy >= min_expectancy
+    )
+
+
 def package_root() -> Path:
     return Path(__file__).resolve().parent
 
@@ -65,9 +93,10 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
                 rt = json.load(f)
         except (OSError, json.JSONDecodeError):
             rt = {}
-        for key in ("risk", "combine", "filters"):
-            if key in rt and isinstance(rt[key], dict):
-                cfg = _deep_merge(cfg, {key: rt[key]})
+        if _runtime_params_acceptable(rt, cfg):
+            for key in ("risk", "combine", "filters"):
+                if key in rt and isinstance(rt[key], dict):
+                    cfg = _deep_merge(cfg, {key: rt[key]})
 
     return cfg
 

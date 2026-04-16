@@ -14,10 +14,15 @@ class SignalConfig:
     entry_threshold: float
     min_confidence: float
     mtf_align_1h: bool
+    mtf_align_4h: bool
     agreement_required: bool
     expectancy_gate: bool
     taker_fee_rate: float
     slippage_bps: float
+    funding_filter_enabled: bool
+    funding_score_weight: float
+    funding_long_block_above: float
+    funding_short_block_below: float
     tp_atr_mult: float
     sl_atr_mult: float
     atr_low_q: float
@@ -75,6 +80,14 @@ def gate_signal_with_reason(
         return 0, "low_confidence", conf
 
     s = combined_score(p_up, pattern, cfg.weight_model, cfg.weight_pattern)
+
+    # Funding rate をスコアに反映（正のFundingはロング過熱とみなしロング寄りスコアを減衰）
+    if cfg.funding_filter_enabled:
+        fr = row.get("funding_rate", np.nan)
+        if isinstance(fr, (float, int)) and not np.isnan(fr):
+            funding_bps = float(fr) * 1e4
+            s -= cfg.funding_score_weight * (funding_bps / 10.0)
+
     if abs(s) < cfg.entry_threshold:
         return 0, "score_below_threshold", conf
 
@@ -93,6 +106,15 @@ def gate_signal_with_reason(
         elif s < 0 and not (s1h <= 0 or (isinstance(s1h, float) and np.isnan(s1h))):
             return 0, "mtf_align_block", conf
 
+    if cfg.mtf_align_4h:
+        s4h = row.get("4h_slope", np.nan)
+        if s == 0:
+            pass
+        elif s > 0 and not (s4h >= 0 or (isinstance(s4h, float) and np.isnan(s4h))):
+            return 0, "mtf_align_block", conf
+        elif s < 0 and not (s4h <= 0 or (isinstance(s4h, float) and np.isnan(s4h))):
+            return 0, "mtf_align_block", conf
+
     if atr_hist is not None and len(atr_hist) > 50:
         q_lo = atr_hist.quantile(cfg.atr_low_q)
         q_hi = atr_hist.quantile(cfg.atr_high_q)
@@ -105,6 +127,14 @@ def gate_signal_with_reason(
         exp_move = (cfg.tp_atr_mult + cfg.sl_atr_mult) / 2.0 * atr / float(row["m15_close"])
         if exp_move <= cost * 1.1:
             return 0, "expectancy_gate_block", conf
+
+    if cfg.funding_filter_enabled:
+        fr = row.get("funding_rate", np.nan)
+        if isinstance(fr, (float, int)) and not np.isnan(fr):
+            if s > 0 and float(fr) >= cfg.funding_long_block_above:
+                return 0, "funding_long_block", conf
+            if s < 0 and float(fr) <= cfg.funding_short_block_below:
+                return 0, "funding_short_block", conf
 
     if s > cfg.entry_threshold:
         return 1, "emit_long", conf
@@ -123,10 +153,15 @@ def signal_config_from_dict(cfg: dict[str, Any]) -> SignalConfig:
         entry_threshold=float(c["entry_threshold"]),
         min_confidence=float(f["min_confidence"]),
         mtf_align_1h=bool(f["mtf_align_1h"]),
+        mtf_align_4h=bool(f.get("mtf_align_4h", False)),
         agreement_required=bool(f["agreement_required"]),
         expectancy_gate=bool(f["expectancy_gate"]),
         taker_fee_rate=float(f["taker_fee_rate"]),
         slippage_bps=float(f["slippage_bps"]),
+        funding_filter_enabled=bool(f.get("funding_filter_enabled", False)),
+        funding_score_weight=float(f.get("funding_score_weight", 0.0)),
+        funding_long_block_above=float(f.get("funding_long_block_above", 0.0005)),
+        funding_short_block_below=float(f.get("funding_short_block_below", -0.0005)),
         tp_atr_mult=float(r["tp_atr_mult"]),
         sl_atr_mult=float(r["sl_atr_mult"]),
         atr_low_q=float(f["atr_low_quantile"]),

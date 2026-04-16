@@ -9,7 +9,9 @@ import pandas as pd
 import requests
 
 KLINES_PATH = "/fapi/v1/klines"
+FUNDING_PATH = "/fapi/v1/fundingRate"
 MAX_LIMIT = 1500
+MAX_FUNDING_LIMIT = 1000
 
 # Binance interval -> milliseconds
 INTERVAL_MS: dict[str, int] = {
@@ -109,6 +111,57 @@ def fetch_klines_range(
     out = out.drop_duplicates(subset=["open_time"]).sort_values("open_time").reset_index(drop=True)
     out = out[(out["open_time"] >= start_ms) & (out["open_time"] < end_ms)]
     return out.reset_index(drop=True)
+
+
+def fetch_funding_rates_range(
+    base_url: str,
+    symbol: str,
+    start_ms: int,
+    end_ms: int,
+    sleep_s: float = 0.15,
+) -> pd.DataFrame:
+    """
+    Paginate Binance USDT-M funding rates in [start_ms, end_ms).
+    Returns columns: funding_time, funding_rate, mark_price.
+    """
+    url = base_url.rstrip("/") + FUNDING_PATH
+    chunks: list[pd.DataFrame] = []
+    cur = int(start_ms)
+    while cur < end_ms:
+        params: dict[str, Any] = {
+            "symbol": symbol,
+            "startTime": int(cur),
+            "endTime": int(end_ms),
+            "limit": MAX_FUNDING_LIMIT,
+        }
+        r = requests.get(url, params=params, timeout=60)
+        r.raise_for_status()
+        raw = r.json()
+        if not raw:
+            break
+        df = pd.DataFrame(raw)
+        if "fundingTime" not in df.columns or "fundingRate" not in df.columns:
+            break
+        out = pd.DataFrame(
+            {
+                "funding_time": df["fundingTime"].astype("int64"),
+                "funding_rate": df["fundingRate"].astype(float),
+                "mark_price": pd.to_numeric(df.get("markPrice"), errors="coerce"),
+            }
+        )
+        chunks.append(out)
+        last_t = int(out["funding_time"].iloc[-1])
+        cur = last_t + 1
+        if len(out) < MAX_FUNDING_LIMIT:
+            break
+        time.sleep(sleep_s)
+
+    if not chunks:
+        return pd.DataFrame(columns=["funding_time", "funding_rate", "mark_price"])
+    ret = pd.concat(chunks, ignore_index=True)
+    ret = ret.drop_duplicates(subset=["funding_time"]).sort_values("funding_time").reset_index(drop=True)
+    ret = ret[(ret["funding_time"] >= start_ms) & (ret["funding_time"] < end_ms)]
+    return ret.reset_index(drop=True)
 
 
 def upsert_sqlite(df: pd.DataFrame, db_path: Path, symbol: str, interval: str) -> None:

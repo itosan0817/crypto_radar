@@ -34,19 +34,28 @@ model:
 combine:
   weight_model: 0.55
   weight_pattern: 0.45
-  entry_threshold: 0.18
+  # エントリー頻度を上げる（ペーパー向けに緩め）
+  entry_threshold: 0.11
 
 filters:
   enabled: true
-  min_confidence: 0.12
-  mtf_align_1h: true
-  agreement_required: true
+  min_confidence: 0.09
+  mtf_align_1h: false
+  mtf_align_4h: false
+  agreement_required: false
   atr_period: 14
   atr_low_quantile: 0.05
   atr_high_quantile: 0.97
-  expectancy_gate: true
+  # 低ボラ時の手数料比較で落とされやすいためペーパーでは緩める
+  expectancy_gate: false
   taker_fee_rate: 0.0004
   slippage_bps: 2.0
+  funding_filter_enabled: true
+  # score補正の強さ。大きいほど正Funding時にロングを抑え、負Funding時にショートを抑える。
+  funding_score_weight: 0.35
+  # hard block 閾値（1回のFunding率）。例 0.00025 = 0.025%
+  funding_long_block_above: 0.00025
+  funding_short_block_below: -0.00025
 
 risk:
   tp_atr_mult: 1.8
@@ -58,6 +67,14 @@ risk:
   cooldown_bars: 8
   # 0 = off. After favorable move of this many ATRs, move stop to breakeven (entry).
   trail_breakeven_atr_mult: 0.0
+  # 0 = off. Partial take profit at entry +/- this ATR multiple.
+  partial_take_profit_atr_mult: 1.0
+  # Fraction of current position to close when partial TP is hit.
+  partial_take_profit_fraction: 0.5
+  # Move stop loss to entry after partial TP.
+  partial_take_profit_move_sl_to_be: true
+  # 0 = off. ATR trailing stop activated after partial TP.
+  trail_after_partial_atr_mult: 1.2
   confidence_tier:
     enabled: true
     # conf <= thresholds[i] uses row i (first match). Tiers from low to high conf.
@@ -98,6 +115,99 @@ tune:
     pnl: 1.0
     drawdown_penalty: 0.5
     profit_factor_bonus: 50.0
+
+runtime_guard:
+  min_trades: 8
+  min_profit_factor: 1.05
+  min_win_rate: 0.45
+  min_expectancy: 0.0
+
+regime:
+  enabled: true
+  # |slope| がこの値以下なら方向感が弱いとみなす
+  max_abs_slope_1h: 0.0016
+  max_abs_slope_4h: 0.0010
+  # 低ボラ時のみレンジ扱い
+  max_atr_ratio: 0.0045
+  range_breakout_guard:
+    enabled: true
+    # 現在ATR比率が基準(quantile)の何倍以上ならレンジ停止するか
+    spike_multiple: 1.8
+    baseline_quantile: 0.5
+    min_hist_bars: 40
+    min_abs_atr_ratio: 0.003
+
+grid:
+  enabled: true
+  # レンジ中心は15m終値EMA
+  center_ema_window: 48
+  # 中心からこのATR倍率を超えたら逆張りエントリー
+  step_atr_mult: 0.6
+  # 中心付近はノートレード
+  deadband_atr_mult: 0.2
+
+entry_timing_1m:
+  enabled: true
+  # 1分足の細かい条件はトレンドのみ（レンジはグリッド判定後、次足成行で入る）
+  only_regimes:
+    - trend
+  ema_fast: 9
+  ema_slow: 21
+  rsi_period: 14
+  breakout_lookback_bars: 3
+  trend:
+    breakout_buffer_bps: 8.0
+  range:
+    rsi_overbought: 52
+    rsi_oversold: 48
+
+news_filter:
+  enabled: true
+  live_sync:
+    enabled: true
+    calendar_url: https://nfs.faireconomy.media/ff_calendar_thisweek.json
+    refresh_seconds: 900
+    request_timeout_seconds: 8
+    # 過去バー（backtest領域）ではライブ同期せず、固定枠にフォールバック
+    max_bar_age_hours_for_sync: 72
+    impacts: [High]
+    countries: [USD]
+    block_before_min: 15
+    block_after_min: 20
+  # UTC基準の定期ウィンドウ（高インパクトイベント対策）
+  windows_utc:
+    # 米CPI目安: 毎月中旬の発表時間帯に近い枠（曜日固定が難しいので毎平日同時刻をガード）
+    - weekday_utc: 0
+      hour_utc: 12
+      minute_utc: 30
+      block_before_min: 20
+      block_after_min: 40
+    - weekday_utc: 1
+      hour_utc: 12
+      minute_utc: 30
+      block_before_min: 20
+      block_after_min: 40
+    - weekday_utc: 2
+      hour_utc: 12
+      minute_utc: 30
+      block_before_min: 20
+      block_after_min: 40
+    - weekday_utc: 3
+      hour_utc: 12
+      minute_utc: 30
+      block_before_min: 20
+      block_after_min: 40
+    - weekday_utc: 4
+      hour_utc: 12
+      minute_utc: 30
+      block_before_min: 20
+      block_after_min: 40
+    # FOMC目安（日本時間深夜に相当するUTC枠）
+    - weekday_utc: 2
+      hour_utc: 18
+      minute_utc: 0
+      block_before_min: 30
+      block_after_min: 90
 
 # `python -m btc_paper_trader tune` が data/runtime_params.json を上書き。
 # 次回起動時 load_config が risk / combine / filters をマージする。
