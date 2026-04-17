@@ -517,6 +517,14 @@ def step_simulation(
             pending = 0
             pending_confidence = 0.0
             pending_regime = "trend"
+            events.append(
+                {
+                    "type": "entry",
+                    "bar": i,
+                    "side": int(side),
+                    "price": float(fill),
+                }
+            )
 
     max_hold = entry_max_hold_bars if entry_max_hold_bars > 0 else max_hold_base
 

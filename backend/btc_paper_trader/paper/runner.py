@@ -133,6 +133,9 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
     hourly_short_blocked_count = int(raw.get("hourly_short_blocked_count", 0))
     hourly_short_block_reasons: dict[str, int] = dict(raw.get("hourly_short_block_reasons", {}))
     hourly_regime_counts: dict[str, int] = dict(raw.get("hourly_regime_counts", {}))
+    hourly_entry_count = int(raw.get("hourly_entry_count", 0))
+    hourly_entry_long_count = int(raw.get("hourly_entry_long_count", 0))
+    hourly_entry_short_count = int(raw.get("hourly_entry_short_count", 0))
 
     last_processed_ot = 0
     cached_df = None
@@ -191,6 +194,14 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
             hourly_new_bars += 1
             sim, events = step_simulation(df, cached_model, cfg, sim, i, None)
             for e in events:
+                if e.get("type") == "entry":
+                    hourly_entry_count += 1
+                    es = int(e.get("side", 0))
+                    if es == 1:
+                        hourly_entry_long_count += 1
+                    elif es == -1:
+                        hourly_entry_short_count += 1
+                    continue
                 if e.get("type") == "decision":
                     hourly_signal_count += 1
                     signal = int(e.get("signal", 0))
@@ -245,11 +256,13 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
                 else "なし"
             )
             regime_text = ", ".join([f"{k}:{v}" for k, v in sorted(hourly_regime_counts.items())]) or "なし"
+            entry_breakdown = f"ロング {hourly_entry_long_count} / ショート {hourly_entry_short_count}"
             post_hourly_summary(
                 f"実現PnL合計: {summ['total_pnl']:.2f} / 取引数 {summ['n_trades']} / 勝率 {summ['win_rate']:.2%} / PF {summ['profit_factor']:.2f}",
                 fields=[
                     {"name": "新しいバー数", "value": f"{hourly_new_bars}", "inline": True},
                     {"name": "シグナル数", "value": f"{hourly_signal_count}", "inline": True},
+                    {"name": "エントリー件数", "value": f"{hourly_entry_count}（{entry_breakdown}）", "inline": False},
                     {"name": "レジーム内訳", "value": regime_text[:1000], "inline": False},
                     {"name": "主な理由", "value": reason_text[:1000], "inline": False},
                     {"name": "ショート候補シグナル数", "value": f"{hourly_short_signal_count}", "inline": True},
@@ -271,6 +284,9 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
             hourly_short_blocked_count = 0
             hourly_short_block_reasons = {}
             hourly_regime_counts = {}
+            hourly_entry_count = 0
+            hourly_entry_long_count = 0
+            hourly_entry_short_count = 0
 
         if last_day_key is not None and day_key != last_day_key:
             summ_d = summarize_trades(list(day_pnls), cfg["backtest"]["initial_quote"])
@@ -323,6 +339,9 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
                 "hourly_short_blocked_count": hourly_short_blocked_count,
                 "hourly_short_block_reasons": hourly_short_block_reasons,
                 "hourly_regime_counts": hourly_regime_counts,
+                "hourly_entry_count": hourly_entry_count,
+                "hourly_entry_long_count": hourly_entry_long_count,
+                "hourly_entry_short_count": hourly_entry_short_count,
                 "last_hour_key": last_hour_key,
                 "last_day_key": last_day_key,
                 "initialized": True,
