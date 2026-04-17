@@ -148,6 +148,8 @@ grid:
 
 entry_timing_1m:
   enabled: true
+  # false(既定)ならレンジでは1分足確認を行わず、グリッド成立後に次足で入る
+  require_range_confirmation: false
   # 1分足の細かい条件はトレンドのみ（レンジはグリッド判定後、次足成行で入る）
   only_regimes:
     - trend

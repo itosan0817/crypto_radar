@@ -207,6 +207,10 @@ def _entry_timing_confirm(side: int, regime: str, row: pd.Series, cfg: dict[str,
     if not bool(et.get("enabled", False)):
         return True, "entry_timing_disabled"
 
+    # Default behavior: skip 1m confirmation in range regime unless explicitly required.
+    if regime == "range" and not bool(et.get("require_range_confirmation", False)):
+        return True, "entry_timing_skipped_regime"
+
     only = et.get("only_regimes")
     if isinstance(only, list) and only and regime not in only:
         return True, "entry_timing_skipped_regime"
