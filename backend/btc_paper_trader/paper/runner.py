@@ -132,6 +132,9 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
     hourly_short_signal_count = int(raw.get("hourly_short_signal_count", 0))
     hourly_short_blocked_count = int(raw.get("hourly_short_blocked_count", 0))
     hourly_short_block_reasons: dict[str, int] = dict(raw.get("hourly_short_block_reasons", {}))
+    hourly_long_signal_count = int(raw.get("hourly_long_signal_count", 0))
+    hourly_long_blocked_count = int(raw.get("hourly_long_blocked_count", 0))
+    hourly_long_block_reasons: dict[str, int] = dict(raw.get("hourly_long_block_reasons", {}))
     hourly_regime_counts: dict[str, int] = dict(raw.get("hourly_regime_counts", {}))
     hourly_entry_count = int(raw.get("hourly_entry_count", 0))
     hourly_entry_long_count = int(raw.get("hourly_entry_long_count", 0))
@@ -210,7 +213,14 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
                     regime = str(e.get("regime", "unknown"))
                     hourly_reason_counts[reason] = hourly_reason_counts.get(reason, 0) + 1
                     hourly_regime_counts[regime] = hourly_regime_counts.get(regime, 0) + 1
-                    if signal == -1:
+                    if signal == 1:
+                        hourly_long_signal_count += 1
+                        if pending_after_guard == 0:
+                            hourly_long_blocked_count += 1
+                            hourly_long_block_reasons[reason] = (
+                                hourly_long_block_reasons.get(reason, 0) + 1
+                            )
+                    elif signal == -1:
                         hourly_short_signal_count += 1
                         if pending_after_guard == 0:
                             hourly_short_blocked_count += 1
@@ -255,6 +265,14 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
                 if top_short_block_reasons
                 else "なし"
             )
+            top_long_block_reasons = sorted(
+                hourly_long_block_reasons.items(), key=lambda x: x[1], reverse=True
+            )[:3]
+            long_block_text = (
+                ", ".join([f"{_reason_ja(k)}:{v}" for k, v in top_long_block_reasons])
+                if top_long_block_reasons
+                else "なし"
+            )
             regime_text = ", ".join([f"{k}:{v}" for k, v in sorted(hourly_regime_counts.items())]) or "なし"
             entry_breakdown = f"ロング {hourly_entry_long_count} / ショート {hourly_entry_short_count}"
             post_hourly_summary(
@@ -265,6 +283,9 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
                     {"name": "エントリー件数", "value": f"{hourly_entry_count}（{entry_breakdown}）", "inline": False},
                     {"name": "レジーム内訳", "value": regime_text[:1000], "inline": False},
                     {"name": "主な理由", "value": reason_text[:1000], "inline": False},
+                    {"name": "ロング候補シグナル数", "value": f"{hourly_long_signal_count}", "inline": True},
+                    {"name": "ロング阻止数", "value": f"{hourly_long_blocked_count}", "inline": True},
+                    {"name": "ロング阻止の主因", "value": long_block_text[:1000], "inline": False},
                     {"name": "ショート候補シグナル数", "value": f"{hourly_short_signal_count}", "inline": True},
                     {"name": "ショート阻止数", "value": f"{hourly_short_blocked_count}", "inline": True},
                     {"name": "ショート阻止の主因", "value": short_block_text[:1000], "inline": False},
@@ -283,6 +304,9 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
             hourly_short_signal_count = 0
             hourly_short_blocked_count = 0
             hourly_short_block_reasons = {}
+            hourly_long_signal_count = 0
+            hourly_long_blocked_count = 0
+            hourly_long_block_reasons = {}
             hourly_regime_counts = {}
             hourly_entry_count = 0
             hourly_entry_long_count = 0
@@ -338,6 +362,9 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
                 "hourly_short_signal_count": hourly_short_signal_count,
                 "hourly_short_blocked_count": hourly_short_blocked_count,
                 "hourly_short_block_reasons": hourly_short_block_reasons,
+                "hourly_long_signal_count": hourly_long_signal_count,
+                "hourly_long_blocked_count": hourly_long_blocked_count,
+                "hourly_long_block_reasons": hourly_long_block_reasons,
                 "hourly_regime_counts": hourly_regime_counts,
                 "hourly_entry_count": hourly_entry_count,
                 "hourly_entry_long_count": hourly_entry_long_count,
