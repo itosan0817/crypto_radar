@@ -62,9 +62,10 @@ risk:
   sl_atr_mult: 1.2
   max_hold_bars: 48
   position_fraction: 0.98
-  max_daily_loss_pct: 0.05
-  cooldown_after_losses: 3
-  cooldown_bars: 8
+  # リスクガードによる新規停止を減らすため一時的に緩和
+  max_daily_loss_pct: 0.08
+  cooldown_after_losses: 5
+  cooldown_bars: 2
   # 0 = off. After favorable move of this many ATRs, move stop to breakeven (entry).
   trail_breakeven_atr_mult: 0.0
   # 0 = off. Partial take profit at entry +/- this ATR multiple.
