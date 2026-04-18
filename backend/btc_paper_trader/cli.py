@@ -11,6 +11,7 @@ from .config import load_config, package_root
 from .eval.metrics import summarize_trades
 from .notify.discord import post_daily_summary, post_hourly_summary, post_tune_result
 from .paper.runner import paper_step_once, run_paper_loop
+from .web.dashboard_app import run_dashboard
 
 
 def main() -> None:
@@ -38,6 +39,11 @@ def main() -> None:
         help="Grid-search last WF window; write data/runtime_params.json (merged on next load_config)",
     )
     s_tune.add_argument("--config", type=Path, default=None)
+
+    s_dash = sub.add_parser("dashboard", help="Read-only web UI (state + recent paper_events.jsonl)")
+    s_dash.add_argument("--config", type=Path, default=None)
+    s_dash.add_argument("--host", type=str, default="127.0.0.1", help="Bind address (use 0.0.0.0 for LAN)")
+    s_dash.add_argument("--port", type=int, default=8765)
 
     args = p.parse_args()
     cfg = load_config(args.config)
@@ -119,6 +125,10 @@ def main() -> None:
                     {"name": "filters", "value": str(out.get("filters")), "inline": False},
                 ],
             )
+        return
+
+    if args.cmd == "dashboard":
+        run_dashboard(host=args.host, port=args.port, config_path=args.config)
         return
 
     if args.cmd == "notify-test":

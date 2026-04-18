@@ -57,6 +57,18 @@ sudo systemctl status btc-paper-trader
 journalctl -u btc-paper-trader -f
 ```
 
+### Web ダッシュボード（読み取り専用）
+
+`paper_state.json` と `paper_events.jsonl` をブラウザで確認できます。認証は付いていないため、**既定は localhost のみ**です。LAN から見る場合は `--host 0.0.0.0` とファイアウォールでポートを限定してください。
+
+```bash
+cd /path/to/crypto_radar/backend
+./venv/bin/pip install -r btc_paper_trader/requirements-btc.txt
+./venv/bin/python -m btc_paper_trader dashboard --host 127.0.0.1 --port 8765
+```
+
+ブラウザで `http://127.0.0.1:8765/` を開く。別プロセスのため `paper` ループと同時に動かせます。
+
 ## 4. 定期 `fetch` + `tune`（自動パラメータ更新）
 
 グリッド探索で **TP/SL・`weight_model`・`entry_threshold`・`min_confidence`** を最後のウォークフォワード窓で評価し、改善時のみ `data/runtime_params.json` を更新します（`config.yaml` の `tune.skip_if_worse_than_current`）。Discord の **日次ウェブフック**に結果サマリが送られます（未設定なら送信されません）。
