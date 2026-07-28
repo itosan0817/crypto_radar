@@ -1,18 +1,21 @@
 [Unit]
 Description=Bribe Sniper Service
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=yoshi
-WorkingDirectory=/home/yoshi/backend
+User=itosaku
+Group=itosaku
+WorkingDirectory=/home/itosaku/crypto_radar/backend
 Environment=PYTHONIOENCODING=utf-8
 Environment=LANG=en_US.UTF-8
-ExecStart=/home/yoshi/backend/venv/bin/python /home/yoshi/backend/bribe_sniper.py
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/itosaku/crypto_radar/backend/venv/bin/python /home/itosaku/crypto_radar/backend/bribe_sniper.py
 Restart=always
 RestartSec=10
-StandardOutput=append:/home/yoshi/backend/bribe_sniper.log
-StandardError=append:/home/yoshi/backend/bribe_sniper.log
+StandardOutput=append:/home/itosaku/crypto_radar/backend/bribe_sniper.log
+StandardError=append:/home/itosaku/crypto_radar/backend/bribe_sniper.log
 
 [Install]
 WantedBy=multi-user.target

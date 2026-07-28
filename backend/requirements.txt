@@ -1,0 +1,7 @@
+web3>=6.0
+python-dotenv>=1.0
+firebase-admin>=6.0
+google-generativeai>=0.5
+pytz>=2024.1
+requests>=2.31
+aiohttp>=3.9

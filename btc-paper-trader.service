@@ -1,0 +1,21 @@
+[Unit]
+Description=BTC Paper Trader (Binance USDT-M simulation)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=itosaku
+Group=itosaku
+WorkingDirectory=/home/itosaku/crypto_radar/backend
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/itosaku/crypto_radar/backend/.env
+ExecStart=/home/itosaku/crypto_radar/backend/venv/bin/python -m btc_paper_trader paper
+Restart=always
+RestartSec=15
+TimeoutStopSec=30
+StandardOutput=append:/home/itosaku/crypto_radar/backend/btc_paper_trader.log
+StandardError=append:/home/itosaku/crypto_radar/backend/btc_paper_trader.log
+
+[Install]
+WantedBy=multi-user.target
