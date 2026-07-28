@@ -195,22 +195,22 @@ def _fmt_values(values: dict[str, Any]) -> str:
 
 def _maybe_rollback(
     cfg: dict[str, Any], at_cfg: dict[str, Any], history_path: Path, log_path: Path
-) -> bool:
-    """直近の適用が実運用で裏目に出ていたら前回値へ戻す。戻したら True。"""
+) -> dict[str, Any] | None:
+    """直近の適用が実運用で裏目に出ていたら前回値へ戻す。戻したら履歴レコードを返す。"""
     hist = tail_jsonl(history_path, max_lines=50)
     last_applied = None
     for rec in reversed(hist):
         if rec.get("type") == "rollback":
-            return False  # 直近がロールバックなら再度は戻さない
+            return None  # 直近がロールバックなら再度は戻さない
         if rec.get("type") == "tune" and rec.get("applied") and not rec.get("dry_run"):
             last_applied = rec
             break
     if not last_applied:
-        return False
+        return None
     days_since = (_utc_ms() - int(last_applied["t"])) / 86_400_000
     wait_days = float(at_cfg.get("rollback_after_days", 2))
     if days_since < wait_days:
-        return False
+        return None
     records = tail_jsonl(log_path, max_lines=16000)
     trades, _ = build_trades(records)
     live_pnl = sum(
@@ -219,26 +219,25 @@ def _maybe_rollback(
     q0 = float(cfg.get("backtest", {}).get("initial_quote", 10000.0))
     threshold = -float(at_cfg.get("rollback_loss_pct", 0.02)) * q0
     if live_pnl > threshold:
-        return False
+        return None
     old_values = last_applied.get("old_values") or {}
     values, err = validate_values(old_values, auto_only=True)
     if err or not values:
-        return False
+        return None
     write_local_overrides(package_root() / "config.local.yaml", values, source="auto_tune rollback")
-    _append_history(history_path, {
+    rec = {
         "t": _utc_ms(), "type": "rollback",
         "reverted_to": values, "from_values": last_applied.get("values"),
         "live_pnl_since_change": round(live_pnl, 2), "threshold": round(threshold, 2),
-    })
-    post_daily_summary(
-        f"⏪ 自動ロールバック: 前回の設定変更後 {days_since:.1f}日 の実現PnLが "
-        f"{live_pnl:.2f} USDT（閾値 {threshold:.2f}）だったため、変更前の設定に戻しました。",
-        fields=[{"name": "復元した設定", "value": _fmt_values(values)[:1000], "inline": False}],
-    )
-    return True
+        "days_since_change": round(days_since, 1),
+    }
+    _append_history(history_path, rec)
+    return rec
 
 
-def run_auto_tune(cfg: dict[str, Any] | None = None, dry_run: bool = False) -> dict[str, Any]:
+def run_auto_tune(
+    cfg: dict[str, Any] | None = None, dry_run: bool = False, notify: bool = True
+) -> dict[str, Any]:
     cfg = cfg or load_config()
     at_cfg = cfg.get("auto_tune") or {}
     root = package_root()
@@ -250,8 +249,16 @@ def run_auto_tune(cfg: dict[str, Any] | None = None, dry_run: bool = False) -> d
     min_trades_floor = int(at_cfg.get("min_trades_floor", 5))
 
     # ⑥ まずロールバック判定（戻した日は新たな変更をしない）
-    if not dry_run and _maybe_rollback(cfg, at_cfg, history_path, log_path):
-        return {"action": "rollback"}
+    rb = None if dry_run else _maybe_rollback(cfg, at_cfg, history_path, log_path)
+    if rb is not None:
+        if notify:
+            post_daily_summary(
+                f"⏪ 自動ロールバック: 前回の設定変更後 {rb['days_since_change']}日 の実現PnLが "
+                f"{rb['live_pnl_since_change']:.2f} USDT（閾値 {rb['threshold']:.2f}）だったため、"
+                "変更前の設定に戻しました。",
+                fields=[{"name": "復元した設定", "value": _fmt_values(rb["reverted_to"])[:1000], "inline": False}],
+            )
+        return {"action": "rollback", **rb}
 
     # ① 診断
     days = 7
@@ -344,26 +351,27 @@ def run_auto_tune(cfg: dict[str, Any] | None = None, dry_run: bool = False) -> d
     }
     _append_history(history_path, rec)
 
-    if winner:
-        ws = winner["summary"]
-        title = ("✅ 自動チューニング適用" if applied else "🧪 自動チューニング（dry-run: 適用せず）")
-        post_daily_summary(
-            f"{title}: 「{winner['name']}」が現行設定に勝ったため"
-            + ("適用しました。" if applied else "採用候補になりました。"),
-            fields=[
-                {"name": "変更", "value": _fmt_values(winner["values"])[:1000], "inline": False},
-                {"name": "仮説", "value": winner["rationale"][:1000] or "—", "inline": False},
-                {"name": f"検証({eval_days}日) 現行", "value": f"PnL {baseline['summary']['total_pnl']:.2f} / 取引 {baseline['summary']['n_trades']} / PF {baseline['summary']['profit_factor']:.2f}", "inline": True},
-                {"name": "採用候補", "value": f"PnL {ws['total_pnl']:.2f} / 取引 {ws['n_trades']} / PF {ws['profit_factor']:.2f}", "inline": True},
-            ],
-        )
-    else:
-        post_daily_summary(
-            f"➖ 自動チューニング: {len(candidates)}候補を検証しましたが、"
-            f"現行設定に明確に勝る候補が無かったため現状維持しました。",
-            fields=[
-                {"name": f"検証({eval_days}日) 現行", "value": f"PnL {baseline['summary']['total_pnl']:.2f} / 取引 {baseline['summary']['n_trades']}", "inline": True},
-                {"name": "方針コメント", "value": (str(proposal.get("comment", "")) or "—")[:1000], "inline": False},
-            ],
-        )
+    if notify:
+        if winner:
+            ws = winner["summary"]
+            title = ("✅ 自動チューニング適用" if applied else "🧪 自動チューニング（dry-run: 適用せず）")
+            post_daily_summary(
+                f"{title}: 「{winner['name']}」が現行設定に勝ったため"
+                + ("適用しました。" if applied else "採用候補になりました。"),
+                fields=[
+                    {"name": "変更", "value": _fmt_values(winner["values"])[:1000], "inline": False},
+                    {"name": "仮説", "value": winner["rationale"][:1000] or "—", "inline": False},
+                    {"name": f"検証({eval_days}日) 現行", "value": f"PnL {baseline['summary']['total_pnl']:.2f} / 取引 {baseline['summary']['n_trades']} / PF {baseline['summary']['profit_factor']:.2f}", "inline": True},
+                    {"name": "採用候補", "value": f"PnL {ws['total_pnl']:.2f} / 取引 {ws['n_trades']} / PF {ws['profit_factor']:.2f}", "inline": True},
+                ],
+            )
+        else:
+            post_daily_summary(
+                f"➖ 自動チューニング: {len(candidates)}候補を検証しましたが、"
+                f"現行設定に明確に勝る候補が無かったため現状維持しました。",
+                fields=[
+                    {"name": f"検証({eval_days}日) 現行", "value": f"PnL {baseline['summary']['total_pnl']:.2f} / 取引 {baseline['summary']['n_trades']}", "inline": True},
+                    {"name": "方針コメント", "value": (str(proposal.get("comment", "")) or "—")[:1000], "inline": False},
+                ],
+            )
     return {"action": "applied" if applied else ("winner_dry_run" if winner else "keep"), **rec}

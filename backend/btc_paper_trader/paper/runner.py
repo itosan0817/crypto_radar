@@ -93,6 +93,98 @@ def _reason_ja(reason: str) -> str:
     return mapping.get(reason, reason)
 
 
+def _fmt_tune_changes(values: dict[str, Any] | None, old_values: dict[str, Any] | None) -> str:
+    parts = []
+    for k, v in (values or {}).items():
+        if k == "combine.weight_pattern":  # weight_model に連動する派生値は表示しない
+            continue
+        short = k.split(".")[-1]
+        old = (old_values or {}).get(k)
+        parts.append(f"{short}: {old}→{v}" if old is not None else f"{short}={v}")
+    return ", ".join(parts) or "—"
+
+
+def _tune_field_value(tune_res: dict[str, Any] | None, tune_err: str | None) -> str | None:
+    """自動チューニング結果を日次レポートの1フィールドに要約する。無効時は None。"""
+    if tune_err:
+        return f"⚠ 実行エラー: {tune_err}"
+    if tune_res is None:
+        return None
+    action = tune_res.get("action")
+    if action == "rollback":
+        return (
+            f"⏪ ロールバック: 適用後 {tune_res.get('days_since_change')}日 の実現PnL "
+            f"{tune_res.get('live_pnl_since_change')} USDT が閾値 {tune_res.get('threshold')} を下回ったため復元\n"
+            f"復元: {_fmt_tune_changes(tune_res.get('reverted_to'), None)}"
+        )
+    if action == "no_candidates":
+        return "➖ 現状維持（有効な候補なし）"
+    b = tune_res.get("baseline") or {}
+    d = tune_res.get("eval_days")
+    base_txt = (
+        f"検証({d}日) 現行: PnL {b.get('total_pnl', 0):.1f} / {b.get('n_trades', 0)}件"
+        if b else ""
+    )
+    if action == "applied":
+        winner_name = tune_res.get("winner")
+        w = next(
+            (c for c in tune_res.get("candidates", []) if c.get("name") == winner_name),
+            {},
+        )
+        ws = w.get("summary") or {}
+        return (
+            f"✅ 適用「{winner_name}」: {_fmt_tune_changes(tune_res.get('values'), tune_res.get('old_values'))}\n"
+            f"仮説: {w.get('rationale', '—')}\n"
+            f"検証({d}日): 現行 PnL {b.get('total_pnl', 0):.1f}({b.get('n_trades', 0)}件) "
+            f"→ 採用 {ws.get('total_pnl', 0):.1f}({ws.get('n_trades', 0)}件)"
+        )
+    n = len(tune_res.get("candidates") or [])
+    return f"➖ 現状維持（{n}候補を検証、現行に明確に勝る候補なし）\n{base_txt}"
+
+
+def _post_daily_report(
+    day_key: str,
+    summ_d: dict[str, Any],
+    review: dict[str, Any] | None,
+    tune_res: dict[str, Any] | None,
+    tune_err: str | None,
+) -> None:
+    """日次サマリ・Claudeレビュー・自動チューニング結果を1通のDiscordメッセージにまとめる。"""
+    text = (
+        f"📊 **日次レポート ({day_key} UTC)**\n"
+        f"実現PnL **{summ_d['total_pnl']:+.2f}** / 取引 {summ_d['n_trades']} / "
+        f"勝率 {summ_d['win_rate']:.1%} / PF {summ_d['profit_factor']:.2f}"
+    )
+    if review and review.get("summary"):
+        text += f"\n\n🤖 **総評**: {str(review['summary'])[:500]}"
+
+    fields: list[dict[str, Any]] = [
+        {
+            "name": "成績詳細",
+            "value": (
+                f"平均利益 {summ_d.get('avg_win', 0):.2f} / 平均損失 {summ_d.get('avg_loss_abs', 0):.2f} / "
+                f"ペイオフ比 {summ_d.get('payoff_ratio', 0):.2f} / 最大連敗 {summ_d.get('max_consecutive_losses', 0)} / "
+                f"期待値 {summ_d['expectancy']:.3f}"
+            ),
+            "inline": False,
+        },
+    ]
+    if review:
+        suggestions = review.get("suggestions") or []
+        if isinstance(suggestions, str):
+            suggestions = [suggestions]
+        fields += [
+            {"name": "✅ 機能した点", "value": str(review.get("what_worked", "—"))[:700], "inline": False},
+            {"name": "⚠️ 課題", "value": str(review.get("issues", "—"))[:700], "inline": False},
+            {"name": "💡 改善提案", "value": ("\n".join(f"- {s}" for s in suggestions) or "—")[:700], "inline": False},
+            {"name": "🔭 翌日の注目点", "value": str(review.get("tomorrow_focus", "—"))[:400], "inline": False},
+        ]
+    tune_txt = _tune_field_value(tune_res, tune_err)
+    if tune_txt:
+        fields.append({"name": "🔧 自動チューニング", "value": tune_txt[:1000], "inline": False})
+    post_daily_summary(text, fields=fields)
+
+
 def _maybe_claude_gate(
     df: pd.DataFrame,
     i: int,
@@ -377,34 +469,37 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
             hourly_entry_short_count = 0
 
         if last_day_key is not None and day_key != last_day_key:
-            summ_d = summarize_trades(list(day_pnls), cfg["backtest"]["initial_quote"])
-            post_daily_summary(
-                f"日次 実現PnL: {summ_d['total_pnl']:.2f} / 取引 {summ_d['n_trades']} / 勝率 {summ_d['win_rate']:.2%} / PF {summ_d['profit_factor']:.2f}",
-                fields=[
-                    {"name": "平均利益", "value": f"{summ_d.get('avg_win', 0):.4f}", "inline": True},
-                    {"name": "平均損失", "value": f"{summ_d.get('avg_loss_abs', 0):.4f}", "inline": True},
-                    {"name": "ペイオフ比", "value": f"{summ_d.get('payoff_ratio', 0):.2f}", "inline": True},
-                    {"name": "最大連敗", "value": f"{summ_d.get('max_consecutive_losses', 0)}", "inline": True},
-                    {"name": "期待値/取引", "value": f"{summ_d['expectancy']:.4f}", "inline": True},
-                ],
-            )
+            # 日次サマリ・Claudeレビュー・自動チューニングを1通のDiscordメッセージに
+            # まとめて送る。レビューとチューニングは数分かかる重い処理のため、
+            # paperループを止めないよう別スレッドで実行する。
+            day_pnls_snapshot = list(day_pnls)
             day_pnls.clear()
-            # Claude による日次レビュー（終了した日 = last_day_key を対象）
-            if (cfg.get("daily_review") or {}).get("enabled", False):
-                try:
-                    run_daily_review(cfg, day_key=last_day_key)
-                except Exception as e:
-                    print(f"[daily_review] unexpected error: {str(e)[:150]}")
-            # Claude 自動チューニング（提案→リスク審査→what-if検証→勝った場合のみ適用）。
-            # モデル学習を複数回行う重い処理のため、paperループを止めないよう別スレッドで実行。
-            if (cfg.get("auto_tune") or {}).get("enabled", False):
-                def _auto_tune_bg() -> None:
+            closed_day = last_day_key
+            cfg_snapshot = cfg
+
+            def _daily_report_bg() -> None:
+                summ_d = summarize_trades(day_pnls_snapshot, cfg_snapshot["backtest"]["initial_quote"])
+                review = None
+                if (cfg_snapshot.get("daily_review") or {}).get("enabled", False):
+                    try:
+                        review = run_daily_review(cfg_snapshot, day_key=closed_day, post=False)
+                    except Exception as e:
+                        print(f"[daily_review] unexpected error: {str(e)[:150]}")
+                tune_res = None
+                tune_err = None
+                if (cfg_snapshot.get("auto_tune") or {}).get("enabled", False):
                     try:
                         from ..advisor.auto_tune import run_auto_tune
-                        run_auto_tune()
+                        tune_res = run_auto_tune(notify=False)
                     except Exception as e:
-                        print(f"[auto_tune] unexpected error: {str(e)[:200]}")
-                threading.Thread(target=_auto_tune_bg, daemon=True).start()
+                        tune_err = str(e)[:200]
+                        print(f"[auto_tune] unexpected error: {tune_err}")
+                try:
+                    _post_daily_report(closed_day, summ_d, review, tune_res, tune_err)
+                except Exception as e:
+                    print(f"[daily_report] post failed: {str(e)[:150]}")
+
+            threading.Thread(target=_daily_report_bg, daemon=True).start()
 
         last_hour_key = hour_key
         last_day_key = day_key
