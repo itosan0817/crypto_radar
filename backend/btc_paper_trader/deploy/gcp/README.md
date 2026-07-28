@@ -82,6 +82,14 @@ sudo systemctl enable --now btc-dashboard
 
 以後は GitHub Actions のデプロイが `btc-dashboard.service` も自動で再起動します（ユニット未導入のサーバーでは何もしません）。
 
+デプロイの自動再起動には、ランナーユーザーがパスワードなしで `systemctl restart btc-dashboard.service` を実行できる必要があります（既存3サービスと同様）。未設定の場合は一度だけ:
+
+```bash
+echo "$(whoami) ALL=(ALL) NOPASSWD: $(command -v systemctl) restart btc-dashboard.service" | sudo tee /etc/sudoers.d/btc-dashboard
+sudo chmod 440 /etc/sudoers.d/btc-dashboard
+sudo -n systemctl restart btc-dashboard.service && echo OK   # パスワードを聞かれなければ成功
+```
+
 #### 設定変更と What-if シミュレーション
 
 ダッシュボードの「設定」パネルから主要パラメータ（エントリー閾値・利確/損切り幅・投入資金割合など）を編集できます。

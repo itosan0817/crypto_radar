@@ -26,9 +26,10 @@ jobs:
           sudo systemctl restart bribe-sniper.service
           sudo systemctl restart btc-paper-trader.service
           # ダッシュボードはユニット導入済みの場合のみ再起動（失敗は隠さずエラーにする）
-          if systemctl list-unit-files --type=service | grep -q '^btc-dashboard.service'; then
-            sudo systemctl restart btc-dashboard.service
-            sudo systemctl is-active btc-dashboard.service
+          # 要: sudoers に btc-dashboard.service の NOPASSWD 許可（deploy/gcp/README.md 参照）
+          if [ -f /etc/systemd/system/btc-dashboard.service ]; then
+            sudo -n systemctl restart btc-dashboard.service
+            systemctl is-active btc-dashboard.service
           else
             echo "btc-dashboard.service not installed; skipping"
           fi
