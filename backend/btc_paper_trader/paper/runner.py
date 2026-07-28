@@ -13,6 +13,7 @@ from ..advisor.daily_review import run_daily_review
 from ..advisor.entry_advisor import advise_entry
 from ..backtest.engine import SimState, prepare_frame, step_simulation, train_model_slice
 from ..config import load_config, package_root
+from ..data.binance_futures import INTERVAL_MS
 from ..eval.metrics import summarize_trades
 from ..notify.discord import post_claude_advice, post_daily_summary, post_hourly_summary
 
@@ -195,42 +196,51 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
     cached_model = None
     reload_sec = float(cfg.get("paper", {}).get("reload_runtime_params_seconds", 0) or 0)
     last_cfg_reload = time.monotonic()
+    signal_step_ms = INTERVAL_MS[cfg["intervals"]["signal"]]
 
     while True:
         if reload_sec > 0 and time.monotonic() - last_cfg_reload >= reload_sec:
             cfg = load_config()
             last_cfg_reload = time.monotonic()
+            signal_step_ms = INTERVAL_MS[cfg["intervals"]["signal"]]
 
-        # 1. Fetch fresh data
-        full_df = prepare_frame(cfg)
-        df = _df_only_closed(full_df)
-        
-        if len(df) < train_window:
-            time.sleep(poll)
-            if once:
-                break
-            continue
+        # 新しい足が閉じたかどうかを、Binanceへ問い合わせず壁時計だけで先に見積もる。
+        # Kline は UTC 境界に整列するため計算だけで判定できる。閉じていなければ
+        # prepare_frame（全期間の特徴量再構築・パターン検索）を丸ごとスキップし、
+        # 直近確定バーの取得のためだけに毎ポーリング重い処理が走るのを防ぐ。
+        now_ms = _utc_ms()
+        guessed_last_closed_ot = (now_ms // signal_step_ms - 1) * signal_step_ms
+        need_fetch = cached_df is None or guessed_last_closed_ot > last_processed_ot
 
-        n = len(df)
-        current_ot = int(df["m15_open_time"].iloc[-1])
-        
-        # 2. Only retrain and refresh features for training if a new candle formed
-        # or if we don't have a cached model yet.
-        if cached_model is None or current_ot != last_processed_ot:
-            i_train0 = max(0, n - train_window)
-            try:
-                cached_model = train_model_slice(df, cfg, i_train0, n - 1)
-                last_processed_ot = current_ot
-                cached_df = df
-            except ValueError:
+        if need_fetch:
+            full_df = prepare_frame(cfg)
+            df = _df_only_closed(full_df)
+
+            if len(df) < train_window:
                 time.sleep(poll)
                 if once:
                     break
                 continue
+
+            n = len(df)
+            current_ot = int(df["m15_open_time"].iloc[-1])
+
+            # 新しい足が確定していた場合のみ再学習する（壁時計の見積もりが Binance 側の
+            # 反映遅延で先走ることがあるため、実データでも念のため確認する）。
+            if cached_model is None or current_ot != last_processed_ot:
+                i_train0 = max(0, n - train_window)
+                try:
+                    cached_model = train_model_slice(df, cfg, i_train0, n - 1)
+                    last_processed_ot = current_ot
+                    cached_df = df
+                except ValueError:
+                    time.sleep(poll)
+                    if once:
+                        break
+                    continue
+            else:
+                df = cached_df
         else:
-            # If no new candle, we can use the cached model and df.
-            # However, we still want to check if the CURRENT (unclosed) bar 
-            # or the latest closed bar needs processing.
             df = cached_df
 
         ot = df["m15_open_time"].astype(np.int64)
