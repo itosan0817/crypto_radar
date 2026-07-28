@@ -234,5 +234,10 @@ daily_review:
   model: sonnet
   timeout_seconds: 300
 
+param_advisor:
+  # ダッシュボードの「Claudeに参考値を聞く」で使うモデルとタイムアウト
+  model: sonnet
+  timeout_seconds: 240
+
 logging:
   jsonl_path: data/paper_events.jsonl
