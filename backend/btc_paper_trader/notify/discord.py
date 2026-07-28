@@ -59,6 +59,39 @@ def post_daily_summary(
     _post_webhook(url, payload)
 
 
+def post_claude_advice(advice: dict[str, Any], blocked: bool, mode: str) -> None:
+    """エントリー候補への Claude セカンドオピニオンを毎時チャンネルへ通知する"""
+    url = env_webhook_hourly()
+    if not url:
+        return
+    side_ja = "ロング" if int(advice.get("side", 0)) == 1 else "ショート"
+    verdict = advice.get("verdict", "approve")
+    if blocked:
+        title_emoji, verdict_ja = "🛑", "拒否（エントリー中止）"
+    elif verdict == "veto":
+        title_emoji, verdict_ja = "⚠️", "拒否推奨（advise モードのためエントリーは続行）"
+    else:
+        title_emoji, verdict_ja = "✅", "承認"
+    embed: dict[str, Any] = {
+        "title": f"{title_emoji} Claude セカンドオピニオン — {side_ja}候補",
+        "description": f"判定: **{verdict_ja}** (自信度 {advice.get('advice_confidence', '-')}%)",
+        "fields": [
+            {"name": "判断理由", "value": str(advice.get("advice_reason", "-"))[:1000], "inline": False},
+            {"name": "注意点", "value": str(advice.get("advice_caution", "-") or "-")[:1000], "inline": False},
+            {
+                "name": "シグナル情報",
+                "value": (
+                    f"根拠: {advice.get('signal_reason', '-')} / レジーム: {advice.get('regime', '-')} / "
+                    f"システム確信度: {advice.get('system_confidence', 0):.3f}"
+                )[:1000],
+                "inline": False,
+            },
+        ],
+        "footer": {"text": f"mode={mode} / model={advice.get('model', '-')} / {advice.get('latency_sec', '-')}s"},
+    }
+    _post_webhook(url, {"embeds": [embed]})
+
+
 def post_tune_result(
     text: str,
     fields: list[dict[str, Any]] | None = None,

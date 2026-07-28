@@ -149,7 +149,7 @@ class DiscordService:
                     "inline": False
                 }
             ],
-            "footer": {"text": f"深層分析完了: {now_jst_str} | Powered by Gemini 2.5 Pro"},
+            "footer": {"text": f"深層分析完了: {now_jst_str} | Powered by Claude"},
             "timestamp": now_utc.isoformat()
         }
         cls._send_embed(embed)

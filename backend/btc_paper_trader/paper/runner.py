@@ -9,10 +9,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from ..advisor.daily_review import run_daily_review
+from ..advisor.entry_advisor import advise_entry
 from ..backtest.engine import SimState, prepare_frame, step_simulation, train_model_slice
 from ..config import load_config, package_root
 from ..eval.metrics import summarize_trades
-from ..notify.discord import post_daily_summary, post_hourly_summary
+from ..notify.discord import post_claude_advice, post_daily_summary, post_hourly_summary
 
 
 def _utc_ms() -> int:
@@ -87,6 +89,54 @@ def _reason_ja(reason: str) -> str:
         "unknown": "不明",
     }
     return mapping.get(reason, reason)
+
+
+def _maybe_claude_gate(
+    df: pd.DataFrame,
+    i: int,
+    sim: SimState,
+    events: list[dict[str, Any]],
+    cfg: dict[str, Any],
+) -> None:
+    """
+    エントリー候補 (pending) が立った直後に Claude セカンドオピニオンを取得する。
+    mode=advise: 記録と通知のみ / mode=gate: veto ならエントリー中止。
+    過去バーのリプレイ時は呼ばない（直近30分以内に確定したバーのみ対象）。
+    """
+    adv_cfg = cfg.get("advisor") or {}
+    if not adv_cfg.get("enabled", False):
+        return
+    mode = str(adv_cfg.get("mode", "advise"))
+    if mode == "off" or sim.pending == 0:
+        return
+    decision = next(
+        (
+            e for e in events
+            if e.get("type") == "decision" and int(e.get("pending_after_guard", 0)) != 0
+        ),
+        None,
+    )
+    if decision is None:
+        return
+    # ライブのバーのみ対象（起動直後の過去バー処理でサブスクを浪費しない）
+    try:
+        close_time = int(df["m15_close_time"].iloc[i])
+        if _utc_ms() - close_time > 30 * 60 * 1000:
+            return
+    except (KeyError, ValueError, TypeError):
+        return
+
+    advice = advise_entry(df, i, decision, sim, cfg)
+    if advice is None:
+        return
+    blocked = mode == "gate" and advice["verdict"] == "veto"
+    if blocked:
+        sim.pending = 0
+        sim.pending_confidence = 0.0
+        sim.pending_regime = "trend"
+    events.append({"type": "claude_advice", "blocked": blocked, **advice})
+    if adv_cfg.get("notify", True):
+        post_claude_advice(advice, blocked=blocked, mode=mode)
 
 
 def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> None:
@@ -196,6 +246,7 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
             oti = int(ot.iloc[i])
             hourly_new_bars += 1
             sim, events = step_simulation(df, cached_model, cfg, sim, i, None)
+            _maybe_claude_gate(df, i, sim, events, cfg)
             for e in events:
                 if e.get("type") == "entry":
                     hourly_entry_count += 1
@@ -325,6 +376,12 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
                 ],
             )
             day_pnls.clear()
+            # Claude による日次レビュー（終了した日 = last_day_key を対象）
+            if (cfg.get("daily_review") or {}).get("enabled", False):
+                try:
+                    run_daily_review(cfg, day_key=last_day_key)
+                except Exception as e:
+                    print(f"[daily_review] unexpected error: {str(e)[:150]}")
 
         last_hour_key = hour_key
         last_day_key = day_key

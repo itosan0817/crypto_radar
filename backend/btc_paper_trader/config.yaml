@@ -215,5 +215,23 @@ news_filter:
 # `python -m btc_paper_trader tune` が data/runtime_params.json を上書き。
 # 次回起動時 load_config が risk / combine / filters をマージする。
 
+# Claude Code CLI (サブスク認証・API課金なし) によるAIアドバイザー
+advisor:
+  # エントリー候補が立った時に Claude へセカンドオピニオンを求める
+  enabled: true
+  # advise = 記録と通知のみ（エントリーは通常実行） / gate = veto でエントリー中止 / off
+  # まず advise で的中率を検証してから gate に切り替えるのを推奨
+  mode: advise
+  model: haiku
+  timeout_seconds: 120
+  log_path: data/claude_advice.jsonl
+  notify: true
+
+daily_review:
+  # 日次ロールオーバー時に Claude がその日のトレードをレビューして Discord へ投稿
+  enabled: true
+  model: sonnet
+  timeout_seconds: 300
+
 logging:
   jsonl_path: data/paper_events.jsonl

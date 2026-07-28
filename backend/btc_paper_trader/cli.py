@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .advisor.daily_review import run_daily_review
 from .backtest.engine import prepare_frame, run_backtest, train_model_slice
 from .backtest.tune import tune_last_window_and_write
 from .backtest.walk_forward import walk_forward
@@ -39,6 +40,11 @@ def main() -> None:
         help="Grid-search last WF window; write data/runtime_params.json (merged on next load_config)",
     )
     s_tune.add_argument("--config", type=Path, default=None)
+
+    s_review = sub.add_parser("review", help="Claude daily trade review (posts to DAILY webhook)")
+    s_review.add_argument("--config", type=Path, default=None)
+    s_review.add_argument("--day", type=str, default=None, help="UTC day YYYY-MM-DD (default: yesterday)")
+    s_review.add_argument("--no-post", action="store_true", help="Print only; skip Discord post")
 
     s_dash = sub.add_parser("dashboard", help="Read-only web UI (state + recent paper_events.jsonl)")
     s_dash.add_argument("--config", type=Path, default=None)
@@ -125,6 +131,14 @@ def main() -> None:
                     {"name": "filters", "value": str(out.get("filters")), "inline": False},
                 ],
             )
+        return
+
+    if args.cmd == "review":
+        review = run_daily_review(cfg, day_key=args.day, post=not args.no_post)
+        if review is None:
+            print("SKIP: no data or claude CLI unavailable")
+        else:
+            print(json.dumps(review, indent=2, ensure_ascii=False))
         return
 
     if args.cmd == "dashboard":

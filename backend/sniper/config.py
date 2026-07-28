@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 from sniper.safe_io import safe_print
 
 # 親ディレクトリをパスに追加（config/settings.py を参照するため）
@@ -13,7 +14,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    env_path = Path(__file__).resolve().parents[1] / ".env"
+    load_dotenv(dotenv_path=env_path)
 except ModuleNotFoundError:
     safe_print("⚠️ python-dotenv が未インストールのため .env 自動読込をスキップします。")
 
@@ -24,7 +26,7 @@ ALCHEMY_BASE_WSS_URL = os.getenv("ALCHEMY_BASE_WSS_URL")
 ALCHEMY_BASE_HTTP_URL = os.getenv("ALCHEMY_BASE_HTTP_URL")
 
 # Discord の Webhook URL
-DISCORD_WEBHOOK_URL = os.getenv("BRIBE_WEBHOOK_URL")
+DISCORD_WEBHOOK_URL = os.getenv("BRIBE_WEBHOOK_URL") or os.getenv("DISCORD_WEBHOOK_URL")
 
 
 # ==========================================

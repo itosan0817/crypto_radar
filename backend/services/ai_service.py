@@ -1,75 +1,99 @@
 import json
 import asyncio
-import google.generativeai as genai
-from config.settings import GEMINI_API_KEY
+import os
+import shutil
+import subprocess
+from config.settings import CLAUDE_CLI_PATH, CLAUDE_FAST_MODEL, CLAUDE_DEEP_MODEL
 from sniper.safe_io import safe_print
 
 class AIService:
     """
-    Gemini AI を使用した解析を担当するサービスクラス。
+    サーバー上の Claude Code CLI (ヘッドレスモード) を使用した解析を担当するサービスクラス。
+    サブスクリプション認証で動作するため API 課金は発生しない。
     """
-    _initialized = False
+    _cli_path = None
+    _cli_checked = False
 
     @classmethod
-    def _initialize(cls):
-        """Gemini API の初期化"""
-        if not cls._initialized:
-            if GEMINI_API_KEY and "YOUR_GEMINI" not in GEMINI_API_KEY:
-                genai.configure(api_key=GEMINI_API_KEY)
-                cls._initialized = True
+    def _get_cli(cls):
+        """claude CLI のパスを取得（初回のみ探索）"""
+        if not cls._cli_checked:
+            cls._cli_path = CLAUDE_CLI_PATH or shutil.which("claude")
+            cls._cli_checked = True
+            if cls._cli_path:
+                safe_print(f"✅ Claude Code CLI 検出: {cls._cli_path}")
+            else:
+                safe_print("⚠️ Claude Code CLI が見つかりません (モック判定で動作します)")
+        return cls._cli_path
+
+    @staticmethod
+    def _extract_json(text: str) -> dict:
+        """応答テキストからJSON部分を取り出してパースする"""
+        text = text.replace('```json', '').replace('```', '').strip()
+        start = text.find('{')
+        end = text.rfind('}')
+        if start != -1 and end != -1:
+            text = text[start:end + 1]
+        return json.loads(text)
+
+    @classmethod
+    def _run_claude_sync(cls, model: str, prompt: str, timeout: int) -> str:
+        """claude -p を同期実行し、応答テキストを返す"""
+        cli = cls._get_cli()
+        proc = subprocess.run(
+            [cli, "-p", "--model", model, "--output-format", "json"],
+            input=prompt,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(f"claude CLI exit {proc.returncode}: {proc.stderr[:200]}")
+        envelope = json.loads(proc.stdout)
+        if envelope.get("is_error") or envelope.get("subtype") != "success":
+            raise RuntimeError(f"claude CLI error: {str(envelope.get('result'))[:200]}")
+        return envelope.get("result", "")
 
     @classmethod
     async def _generate_with_retry(cls, model_type: str, prompt: str, max_retries: int = 3) -> str:
-        """指定モデルでリトライ付きの生成を行う。JSON形式固定"""
-        target_model = "models/gemini-2.5-flash" if model_type == "flash" else "models/gemini-2.5-pro"
-        fallback_model = "models/gemini-flash-latest" if model_type == "flash" else "models/gemini-2.5-flash"
+        """指定モデルでリトライ付きの生成を行う"""
+        target_model = CLAUDE_FAST_MODEL if model_type == "flash" else CLAUDE_DEEP_MODEL
+        fallback_model = CLAUDE_FAST_MODEL
+        timeout = 180 if model_type == "flash" else 300
 
-        generation_config = {"response_mime_type": "application/json"}
         last_e = None
-        
+
         # メインモデル
         for attempt in range(max_retries):
             try:
-                model = genai.GenerativeModel(target_model, generation_config=generation_config)
-                response = await asyncio.to_thread(model.generate_content, prompt)
-                return response.text
+                return await asyncio.to_thread(cls._run_claude_sync, target_model, prompt, timeout)
             except Exception as e:
                 last_e = e
-                err_str = str(e).lower()
-                if "429" in err_str or "quota" in err_str or "too many requests" in err_str:
-                    wait_sec = 2 ** attempt * 2  # 2, 4, 8秒
-                    safe_print(f"⏳ {target_model} Quota到達。{wait_sec}秒後に再試行... ({attempt+1}/{max_retries})")
-                    await asyncio.sleep(wait_sec)
-                else:
-                    break
-        
+                wait_sec = 2 ** attempt * 2  # 2, 4, 8秒
+                safe_print(f"⏳ Claude ({target_model}) エラー。{wait_sec}秒後に再試行... ({attempt+1}/{max_retries}): {str(e)[:100]}")
+                await asyncio.sleep(wait_sec)
+
         # フォールバックモデル
-        safe_print(f"🔄 {target_model} 制限到達のため、{fallback_model} で代行実行します...")
-        for attempt in range(max_retries):
-            try:
-                model = genai.GenerativeModel(fallback_model, generation_config=generation_config)
-                response = await asyncio.to_thread(model.generate_content, prompt)
-                return response.text
-            except Exception as e:
-                last_e = e
-                err_str = str(e).lower()
-                if "429" in err_str or "quota" in err_str or "too many requests" in err_str:
-                    wait_sec = 2 ** attempt * 2
-                    await asyncio.sleep(wait_sec)
-                else:
-                    break
-                    
+        if fallback_model != target_model:
+            safe_print(f"🔄 {target_model} 失敗のため、{fallback_model} で代行実行します...")
+            for attempt in range(max_retries):
+                try:
+                    return await asyncio.to_thread(cls._run_claude_sync, fallback_model, prompt, timeout)
+                except Exception as e:
+                    last_e = e
+                    await asyncio.sleep(2 ** attempt * 2)
+
         raise last_e
 
     @classmethod
     async def analyze_calldata_risk(cls, decoded_data_str: str, tvl_ratio: float, model_type: str = "flash") -> tuple[int, str, str]:
         """
-        Gemini APIを使用して変更予約のリスクとインパクトを解析する。
+        Claude を使用して変更予約のリスクとインパクトを解析する。
         """
-        cls._initialize()
-        
-        if not GEMINI_API_KEY or "YOUR_GEMINI" in GEMINI_API_KEY:
-            return 75, "A", "Gemini APIキー未設定 (モック判定)"
+        if not cls._get_cli():
+            return 75, "A", "Claude CLI 未検出 (モック判定)"
 
         prompt = f"""
         あなたはDeFiのセキュリティ専門家で、
@@ -78,38 +102,34 @@ class AIService:
 
         【コンテキスト】
         TVL割合 (影響の大きさ): {tvl_ratio * 100:.2f}%
-        デコード済みCalldata: 
+        デコード済みCalldata:
         {decoded_data_str}
 
         【出力要件】
-        以下の要素を持つJSON形式でのみ出力してください:
+        以下の要素を持つJSONのみを出力してください。JSON以外の文章やコードフェンスは含めないでください:
         "ai_score": 0~100の整数 (価格インパクトの強さ。100が最強)
         "ai_rank": "S", "A", または "B" (S: 80以上, A: 60-79, B: 59以下)
         "ai_summary": "日本語で簡潔な要約（150文字以内）。スコアをつけた理由、根拠。"
         """
-        
+
         try:
             text = await cls._generate_with_retry(model_type, prompt)
-            # generation_configでJSON固定されているが、念のためクリーンアップ
-            text = text.replace('```json', '').replace('```', '').strip()
-            result = json.loads(text)
-            
+            result = cls._extract_json(text)
+
             score = int(result.get("ai_score", 50))
             rank = result.get("ai_rank", "B")
             summary = result.get("ai_summary", "解析不能なデータが含まれていました")
-            
+
             return score, rank, summary
         except Exception as e:
-            safe_print(f"⚠️ Gemini AI解析エラー: {e}")
+            safe_print(f"⚠️ Claude AI解析エラー: {e}")
             return 50, "B", f"AI処理リソース確保失敗: {str(e)[:50]}"
 
     @classmethod
     async def analyze_with_trend(cls, decoded_data_str: str, tvl_ratio: float, recent_events: list) -> dict:
         """
-        過去のトレンドデータを含めた深層分析（Proモデル優先・リトライ有）
+        過去のトレンドデータを含めた深層分析（上位モデル優先・リトライ有）
         """
-        cls._initialize()
-        
         history_str = "\n".join([
             f"- {e['timestamp']}: Method {e['method_id']} (Rank {e['ai_rank']}, Score {e['ai_score']})"
             for e in recent_events
@@ -121,30 +141,29 @@ class AIService:
 
         【今回の変更内容】
         TVL割合: {tvl_ratio * 100:.2f}%
-        デコード済みCalldata: 
+        デコード済みCalldata:
         {decoded_data_str}
 
         【過去7日間の履歴トレンド】
         {history_str}
 
         【出力要件】
-        以下の要素を持つJSON形式でのみ出力してください（日本語で回答）:
+        以下の要素を持つJSONのみを出力してください（日本語で回答）。JSON以外の文章やコードフェンスは含めないでください:
         "daily_insight": "今回の単独変数の詳細分析（120文字以内）"
         "trend_insight": "過去の傾向との比較、予兆、整合性の分析（120文字以内）"
         "final_decision": "強気買い(BUY), 売り逃げ(SELL), 即撤退(DANGER), または 静観(WAIT)"
         "ai_score": 0~100の整数
         "ai_rank": "S", "A", または "B"
         """
-        
+
         try:
             text = await cls._generate_with_retry("pro", prompt, max_retries=3)
-            text = text.replace('```json', '').replace('```', '').strip()
-            return json.loads(text)
+            return cls._extract_json(text)
         except Exception as e:
             short_err = str(e)[:100]
-            safe_print(f"⚠️ Gemini 深層分析限界エラー: {short_err}...")
+            safe_print(f"⚠️ Claude 深層分析エラー: {short_err}...")
             return {
-                "daily_insight": "API制限またはタイムアウトによりAI詳細分析をスキップしました。",
+                "daily_insight": "AI呼び出しエラーによりAI詳細分析をスキップしました。",
                 "trend_insight": "しばらく時間をおいてから再チェックしてください。一時的なリソース不足です。",
                 "final_decision": "WAIT",
                 "ai_score": 50,
