@@ -69,6 +69,19 @@ cd /path/to/crypto_radar/backend
 
 ブラウザで `http://127.0.0.1:8765/` を開く。別プロセスのため `paper` ループと同時に動かせます。
 
+チャート（値動き・エントリー/決済ポイント・資産推移）と取引履歴を表示します。ローソク足チャートの描画には unpkg.com の lightweight-charts を CDN 読み込みするため、閲覧するブラウザ側にインターネット接続が必要です。
+
+#### systemd で常駐させる（初回のみ）
+
+```bash
+sudo cp btc_paper_trader/deploy/gcp/btc-dashboard.service /etc/systemd/system/
+sudo sed -i "s|@DEPLOY_ROOT@|/home/あなたのユーザー/crypto_radar|g; s|@USER@|あなたのユーザー|g" /etc/systemd/system/btc-dashboard.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now btc-dashboard
+```
+
+以後は GitHub Actions のデプロイが `btc-dashboard.service` も自動で再起動します（ユニット未導入のサーバーでは何もしません）。
+
 ## 4. 定期 `fetch` + `tune`（自動パラメータ更新）
 
 グリッド探索で **TP/SL・`weight_model`・`entry_threshold`・`min_confidence`** を最後のウォークフォワード窓で評価し、改善時のみ `data/runtime_params.json` を更新します（`config.yaml` の `tune.skip_if_worse_than_current`）。Discord の **日次ウェブフック**に結果サマリが送られます（未設定なら送信されません）。

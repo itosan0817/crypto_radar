@@ -1,0 +1,25 @@
+# systemd ユニット（Linux VM 用）— 読み取り専用Webダッシュボード
+# インストール時に @DEPLOY_ROOT@ をリポジトリルート（crypto_radar）の絶対パスに置換する。
+# 例: sudo sed -i 's|@DEPLOY_ROOT@|/home/itosaku/crypto_radar|g; s|@USER@|itosaku|g' /etc/systemd/system/btc-dashboard.service
+#
+# --host 0.0.0.0 でLAN内の他端末からも閲覧可能。外部公開する場合はリバースプロキシ+認証を挟むこと。
+
+[Unit]
+Description=BTC Paper Trader Dashboard (read-only web UI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+WorkingDirectory=@DEPLOY_ROOT@/backend
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-@DEPLOY_ROOT@/backend/.env
+ExecStart=@DEPLOY_ROOT@/backend/venv/bin/python -m btc_paper_trader dashboard --host 0.0.0.0 --port 8765
+Restart=always
+RestartSec=10
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

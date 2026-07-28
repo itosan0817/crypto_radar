@@ -523,6 +523,9 @@ def step_simulation(
                     "bar": i,
                     "side": int(side),
                     "price": float(fill),
+                    "qty": float(qty),
+                    "tp": float(tp),
+                    "sl": float(sl),
                 }
             )
 
@@ -625,7 +628,18 @@ def step_simulation(
             if consecutive_losses >= cd_losses:
                 cooldown_first_allowed_i = i + 1 + cd_bars
                 consecutive_losses = 0
-            events.append({"pnl": float(pnl), "reason": reason, "side": side, "bar": i})
+            events.append(
+                {
+                    "type": "exit",
+                    "pnl": float(pnl),
+                    "reason": reason,
+                    "side": side,
+                    "bar": i,
+                    "price": float(exit_px),
+                    "entry_px": float(entry_px),
+                    "qty": float(qty),
+                }
+            )
             side = 0
             qty = 0.0
             entry_max_hold_bars = 0
