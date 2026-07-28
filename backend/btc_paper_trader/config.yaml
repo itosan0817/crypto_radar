@@ -230,6 +230,11 @@ advisor:
   log_path: data/claude_advice.jsonl
   notify: true
 
+notify:
+  # 毎時サマリのDiscord通知。日次サマリ・日次レビュー・自動チューニング通知が
+  # あれば十分なため既定はオフ（稼働開始通知は影響を受けない）
+  hourly_summary: false
+
 daily_review:
   # 日次ロールオーバー時に Claude がその日のトレードをレビューして Discord へ投稿
   enabled: true

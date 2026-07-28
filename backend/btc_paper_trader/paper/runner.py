@@ -316,49 +316,51 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
         day_key = now_utc.strftime("%Y-%m-%d")
 
         if last_hour_key is not None and hour_key != last_hour_key:
-            summ = summarize_trades(list(hourly_pnls), cfg["backtest"]["initial_quote"])
-            top_reasons = sorted(hourly_reason_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-            reason_text = ", ".join([f"{_reason_ja(k)}:{v}" for k, v in top_reasons]) if top_reasons else "なし"
-            top_short_block_reasons = sorted(
-                hourly_short_block_reasons.items(), key=lambda x: x[1], reverse=True
-            )[:3]
-            short_block_text = (
-                ", ".join([f"{_reason_ja(k)}:{v}" for k, v in top_short_block_reasons])
-                if top_short_block_reasons
-                else "なし"
-            )
-            top_long_block_reasons = sorted(
-                hourly_long_block_reasons.items(), key=lambda x: x[1], reverse=True
-            )[:3]
-            long_block_text = (
-                ", ".join([f"{_reason_ja(k)}:{v}" for k, v in top_long_block_reasons])
-                if top_long_block_reasons
-                else "なし"
-            )
-            regime_text = ", ".join([f"{k}:{v}" for k, v in sorted(hourly_regime_counts.items())]) or "なし"
-            entry_breakdown = f"ロング {hourly_entry_long_count} / ショート {hourly_entry_short_count}"
-            post_hourly_summary(
-                f"実現PnL合計: {summ['total_pnl']:.2f} / 取引数 {summ['n_trades']} / 勝率 {summ['win_rate']:.2%} / PF {summ['profit_factor']:.2f}",
-                fields=[
-                    {"name": "新しいバー数", "value": f"{hourly_new_bars}", "inline": True},
-                    {"name": "シグナル数", "value": f"{hourly_signal_count}", "inline": True},
-                    {"name": "エントリー件数", "value": f"{hourly_entry_count}（{entry_breakdown}）", "inline": False},
-                    {"name": "レジーム内訳", "value": regime_text[:1000], "inline": False},
-                    {"name": "主な理由", "value": reason_text[:1000], "inline": False},
-                    {"name": "ロング候補シグナル数", "value": f"{hourly_long_signal_count}", "inline": True},
-                    {"name": "ロング阻止数", "value": f"{hourly_long_blocked_count}", "inline": True},
-                    {"name": "ロング阻止の主因", "value": long_block_text[:1000], "inline": False},
-                    {"name": "ショート候補シグナル数", "value": f"{hourly_short_signal_count}", "inline": True},
-                    {"name": "ショート阻止数", "value": f"{hourly_short_blocked_count}", "inline": True},
-                    {"name": "ショート阻止の主因", "value": short_block_text[:1000], "inline": False},
-                    {"name": "1取引あたり期待損益", "value": f"{summ['expectancy']:.4f}", "inline": True},
-                    {"name": "最大ドローダウン", "value": f"{summ['max_drawdown']:.4f}", "inline": True},
-                    {"name": "平均利益", "value": f"{summ.get('avg_win', 0):.4f}", "inline": True},
-                    {"name": "平均損失", "value": f"{summ.get('avg_loss_abs', 0):.4f}", "inline": True},
-                    {"name": "ペイオフ比", "value": f"{summ.get('payoff_ratio', 0):.2f}", "inline": True},
-                    {"name": "最大連敗", "value": f"{summ.get('max_consecutive_losses', 0)}", "inline": True},
-                ],
-            )
+            # 毎時サマリ通知は notify.hourly_summary で制御（既定オフ。日次通知で十分なため）
+            if (cfg.get("notify") or {}).get("hourly_summary", False):
+                summ = summarize_trades(list(hourly_pnls), cfg["backtest"]["initial_quote"])
+                top_reasons = sorted(hourly_reason_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+                reason_text = ", ".join([f"{_reason_ja(k)}:{v}" for k, v in top_reasons]) if top_reasons else "なし"
+                top_short_block_reasons = sorted(
+                    hourly_short_block_reasons.items(), key=lambda x: x[1], reverse=True
+                )[:3]
+                short_block_text = (
+                    ", ".join([f"{_reason_ja(k)}:{v}" for k, v in top_short_block_reasons])
+                    if top_short_block_reasons
+                    else "なし"
+                )
+                top_long_block_reasons = sorted(
+                    hourly_long_block_reasons.items(), key=lambda x: x[1], reverse=True
+                )[:3]
+                long_block_text = (
+                    ", ".join([f"{_reason_ja(k)}:{v}" for k, v in top_long_block_reasons])
+                    if top_long_block_reasons
+                    else "なし"
+                )
+                regime_text = ", ".join([f"{k}:{v}" for k, v in sorted(hourly_regime_counts.items())]) or "なし"
+                entry_breakdown = f"ロング {hourly_entry_long_count} / ショート {hourly_entry_short_count}"
+                post_hourly_summary(
+                    f"実現PnL合計: {summ['total_pnl']:.2f} / 取引数 {summ['n_trades']} / 勝率 {summ['win_rate']:.2%} / PF {summ['profit_factor']:.2f}",
+                    fields=[
+                        {"name": "新しいバー数", "value": f"{hourly_new_bars}", "inline": True},
+                        {"name": "シグナル数", "value": f"{hourly_signal_count}", "inline": True},
+                        {"name": "エントリー件数", "value": f"{hourly_entry_count}（{entry_breakdown}）", "inline": False},
+                        {"name": "レジーム内訳", "value": regime_text[:1000], "inline": False},
+                        {"name": "主な理由", "value": reason_text[:1000], "inline": False},
+                        {"name": "ロング候補シグナル数", "value": f"{hourly_long_signal_count}", "inline": True},
+                        {"name": "ロング阻止数", "value": f"{hourly_long_blocked_count}", "inline": True},
+                        {"name": "ロング阻止の主因", "value": long_block_text[:1000], "inline": False},
+                        {"name": "ショート候補シグナル数", "value": f"{hourly_short_signal_count}", "inline": True},
+                        {"name": "ショート阻止数", "value": f"{hourly_short_blocked_count}", "inline": True},
+                        {"name": "ショート阻止の主因", "value": short_block_text[:1000], "inline": False},
+                        {"name": "1取引あたり期待損益", "value": f"{summ['expectancy']:.4f}", "inline": True},
+                        {"name": "最大ドローダウン", "value": f"{summ['max_drawdown']:.4f}", "inline": True},
+                        {"name": "平均利益", "value": f"{summ.get('avg_win', 0):.4f}", "inline": True},
+                        {"name": "平均損失", "value": f"{summ.get('avg_loss_abs', 0):.4f}", "inline": True},
+                        {"name": "ペイオフ比", "value": f"{summ.get('payoff_ratio', 0):.2f}", "inline": True},
+                        {"name": "最大連敗", "value": f"{summ.get('max_consecutive_losses', 0)}", "inline": True},
+                    ],
+                )
             hourly_pnls.clear()
             hourly_new_bars = 0
             hourly_signal_count = 0
