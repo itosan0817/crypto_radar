@@ -13,28 +13,14 @@ import yaml
 from flask import Flask, Response, jsonify, request
 
 from ..config import load_config, package_root
-
-# ダッシュボードから編集を許可する設定項目（それ以外のキーは拒否する）
-_EDITABLE_PARAMS: list[dict[str, Any]] = [
-    {"path": "combine.entry_threshold", "label": "エントリー閾値", "type": "float",
-     "min": 0.0, "max": 1.0, "step": 0.01, "help": "小さいほど取引が増える"},
-    {"path": "combine.weight_model", "label": "モデル比重", "type": "float",
-     "min": 0.0, "max": 1.0, "step": 0.05, "help": "パターン比重は自動で 1−この値"},
-    {"path": "filters.min_confidence", "label": "最低確信度", "type": "float",
-     "min": 0.0, "max": 1.0, "step": 0.01, "help": "大きいほど厳選"},
-    {"path": "risk.tp_atr_mult", "label": "利確幅 (ATR倍)", "type": "float",
-     "min": 0.1, "max": 10.0, "step": 0.1, "help": ""},
-    {"path": "risk.sl_atr_mult", "label": "損切り幅 (ATR倍)", "type": "float",
-     "min": 0.1, "max": 10.0, "step": 0.1, "help": ""},
-    {"path": "risk.max_hold_bars", "label": "最大保有バー数", "type": "int",
-     "min": 1, "max": 500, "step": 1, "help": "15分足の本数"},
-    {"path": "risk.position_fraction", "label": "投入資金割合", "type": "float",
-     "min": 0.01, "max": 1.0, "step": 0.01, "help": ""},
-    {"path": "risk.max_daily_loss_pct", "label": "日次最大損失率", "type": "float",
-     "min": 0.005, "max": 1.0, "step": 0.005, "help": "超えると当日の新規停止"},
-    {"path": "advisor.mode", "label": "Claudeアドバイザー", "type": "choice",
-     "choices": ["advise", "gate", "off"], "help": "gate=vetoでエントリー中止"},
-]
+from ..eval.trade_log import build_trades as _build_trades
+from ..eval.trade_log import period_stats as _advice_stats
+from ..eval.trade_log import tail_jsonl as _tail_jsonl
+from ..settings_spec import EDITABLE_PARAMS as _EDITABLE_PARAMS
+from ..settings_spec import get_by_path as _get_by_path
+from ..settings_spec import validate_values as _validate_values
+from ..settings_spec import values_to_nested as _values_to_nested
+from ..settings_spec import write_local_overrides
 
 # チャートで選択できる時間足
 _ALLOWED_INTERVALS = ["1m", "15m", "1h", "4h", "1d", "1w"]
@@ -377,6 +363,25 @@ _DASH_HTML = """<!DOCTYPE html>
           </tr>
         </thead>
         <tbody id="trades-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Claude 自動チューニング履歴</h2>
+    <p class="chart-note">毎日の日次締め（09:00 JST頃）に、Claudeが候補を提案 → バックテストで検証 → 現行設定に勝った場合のみ自動適用します。資金リスク系（投入資金割合・日次最大損失率）は自動調整の対象外です。</p>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr>
+            <th>日時 (JST)</th>
+            <th>結果</th>
+            <th>変更内容</th>
+            <th>理由 / コメント</th>
+            <th>検証成績</th>
+          </tr>
+        </thead>
+        <tbody id="autotune-body"></tbody>
       </table>
     </div>
   </section>
@@ -1156,6 +1161,57 @@ _DASH_HTML = """<!DOCTYPE html>
       });
     }
 
+    // ---- 自動チューニング履歴 ----
+    function fmtChanges(values, oldValues) {
+      if (!values) return "—";
+      return Object.keys(values).map(function (k) {
+        const short = k.split(".").pop();
+        if (k === "combine.weight_pattern") return null; // weight_model に連動する派生値は省略
+        const oldV = oldValues && oldValues[k] != null ? oldValues[k] + "→" : "";
+        return short + ": " + oldV + values[k];
+      }).filter(Boolean).join(", ") || "—";
+    }
+
+    async function loadAutotune() {
+      try {
+        const res = await fetch("/api/autotune-history?limit=20").then(function (r) { return r.json(); });
+        const rows = res.history || [];
+        const tbody = document.getElementById("autotune-body");
+        if (!rows.length) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted)">まだ実行履歴がありません（毎日 09:00 JST 頃に自動実行されます）</td></tr>';
+          return;
+        }
+        tbody.innerHTML = rows.map(function (r) {
+          let result, change, reason, perf = "—";
+          if (r.type === "rollback") {
+            result = '<span class="pill short">ロールバック</span>';
+            change = fmtChanges(r.reverted_to);
+            reason = "適用後の実現PnL " + (r.live_pnl_since_change != null ? r.live_pnl_since_change : "—") + " USDT が閾値を下回ったため復元";
+          } else {
+            result = r.applied ? '<span class="pill long">適用</span>'
+              : (r.winner ? '<span class="pill flat">dry-run</span>' : '<span class="pill flat">現状維持</span>');
+            change = r.values ? fmtChanges(r.values, r.old_values) : "—";
+            let winnerRat = "";
+            if (r.winner && r.candidates) {
+              const w = r.candidates.filter(function (c) { return c.name === r.winner; })[0];
+              if (w) winnerRat = "「" + r.winner + "」" + (w.rationale || "");
+            }
+            reason = winnerRat || r.comment || r.reason || "—";
+            if (r.baseline) {
+              perf = "現行 " + Number(r.baseline.total_pnl).toFixed(1) + " (" + r.baseline.n_trades + "件)";
+              if (r.winner && r.candidates) {
+                const w = r.candidates.filter(function (c) { return c.name === r.winner; })[0];
+                if (w && w.summary) perf += " → 採用 " + Number(w.summary.total_pnl).toFixed(1) + " (" + w.summary.n_trades + "件)";
+              }
+            }
+          }
+          return "<tr><td class='mono'>" + fmtJst(r.t) + "</td><td>" + result + "</td>" +
+            "<td class='mono'>" + change + "</td><td>" + reason + "</td>" +
+            "<td class='mono'>" + perf + "</td></tr>";
+        }).join("");
+      } catch (e) { /* 履歴が無くても他の表示は継続 */ }
+    }
+
     // ---- メイン読み込み ----
     async function load() {
       const st = document.getElementById("status");
@@ -1177,6 +1233,7 @@ _DASH_HTML = """<!DOCTYPE html>
         renderEquity(lastEquity);
         document.getElementById("trades-body").innerHTML = tradesRowsHtml(actualTrades);
         renderStatePanel(state);
+        loadAutotune();
         st.textContent = "最終更新: " + new Date().toLocaleTimeString("ja-JP") + " JST" +
           (jpy() ? "（1 USD = ¥" + fmtNum(fx.rate, 2) + "）" : "");
       } catch (e) {
@@ -1270,171 +1327,6 @@ _DASH_HTML = """<!DOCTYPE html>
 
 def _utc_ms() -> int:
     return int(datetime.now(timezone.utc).timestamp() * 1000)
-
-
-def _tail_jsonl(path: Path, max_lines: int = 200) -> list[dict[str, Any]]:
-    if not path.exists() or path.stat().st_size == 0:
-        return []
-    size = path.stat().st_size
-    chunk = min(8_000_000, size)
-    with open(path, "rb") as f:
-        f.seek(-chunk, 2)
-        raw = f.read().decode("utf-8", errors="replace")
-    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-    out: list[dict[str, Any]] = []
-    for line in lines[-max_lines:]:
-        try:
-            out.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    return out
-
-
-def _build_trades(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-    """イベントレコード列からエントリー/決済をペアリングして取引一覧を作る。
-
-    records は paper_events.jsonl の行（bar_open_time / quote / events）と同形。
-    what-if の結果 (whatif.run_what_if の records) も同じ形なので共用できる。
-    決済イベントは旧形式 (type なし・price なし) にも対応する。
-    """
-    trades: list[dict[str, Any]] = []
-    open_tr: dict[str, Any] | None = None
-    for rec in records:
-        bar_t = rec.get("bar_open_time")
-        for e in rec.get("events", []):
-            etype = e.get("type")
-            if etype == "entry":
-                open_tr = {
-                    "entry_time": bar_t,
-                    "side": e.get("side"),
-                    "entry_px": e.get("price"),
-                    "qty": e.get("qty"),
-                    "tp": e.get("tp"),
-                    "sl": e.get("sl"),
-                }
-            elif etype == "partial_exit":
-                trades.append(
-                    {
-                        "entry_time": open_tr.get("entry_time") if open_tr else None,
-                        "entry_px": open_tr.get("entry_px") if open_tr else None,
-                        "side": e.get("side"),
-                        "exit_time": bar_t,
-                        "exit_px": e.get("price"),
-                        "pnl": e.get("pnl"),
-                        "reason": "partial_tp",
-                        "partial": True,
-                    }
-                )
-            elif etype == "exit" or (etype is None and "pnl" in e):
-                entry_px = e.get("entry_px")
-                if entry_px is None and open_tr:
-                    entry_px = open_tr.get("entry_px")
-                trades.append(
-                    {
-                        "entry_time": open_tr.get("entry_time") if open_tr else None,
-                        "entry_px": entry_px,
-                        "side": e.get("side"),
-                        "exit_time": bar_t,
-                        "exit_px": e.get("price"),
-                        "pnl": e.get("pnl"),
-                        "reason": e.get("reason"),
-                        "partial": False,
-                    }
-                )
-                open_tr = None
-    return trades, open_tr
-
-
-def _advice_stats(records: list[dict[str, Any]], since_ms: int, days: int) -> dict[str, Any]:
-    """Claude 参考値プロンプト用の直近成績サマリ"""
-    trades, _ = _build_trades(records)
-    closed = [
-        t for t in trades
-        if not t.get("partial") and t.get("pnl") is not None
-        and (t.get("exit_time") or 0) >= since_ms
-    ]
-    partial_pnl = sum(
-        t.get("pnl") or 0 for t in trades
-        if t.get("partial") and (t.get("exit_time") or 0) >= since_ms
-    )
-    wins = [t["pnl"] for t in closed if t["pnl"] > 0]
-    losses = [t["pnl"] for t in closed if t["pnl"] <= 0]
-    exit_reasons: dict[str, int] = {}
-    for t in closed:
-        r = str(t.get("reason") or "?")
-        exit_reasons[r] = exit_reasons.get(r, 0) + 1
-    block_reasons: dict[str, int] = {}
-    for rec in records:
-        if (rec.get("bar_open_time") or 0) < since_ms:
-            continue
-        for e in rec.get("events", []):
-            if (
-                e.get("type") == "decision"
-                and int(e.get("signal", 0) or 0) != 0
-                and int(e.get("pending_after_guard", 0) or 0) == 0
-            ):
-                r = str(e.get("reason") or "?")
-                block_reasons[r] = block_reasons.get(r, 0) + 1
-    top_blocks = dict(sorted(block_reasons.items(), key=lambda x: x[1], reverse=True)[:5])
-    return {
-        "days": days,
-        "n_trades": len(closed),
-        "win_rate": (len(wins) / len(closed)) if closed else 0.0,
-        "total_pnl": sum(t["pnl"] for t in closed) + partial_pnl,
-        "avg_win": (sum(wins) / len(wins)) if wins else 0.0,
-        "avg_loss": (sum(losses) / len(losses)) if losses else 0.0,
-        "exit_reasons": exit_reasons,
-        "block_reasons": top_blocks,
-    }
-
-
-def _get_by_path(cfg: dict[str, Any], dotted: str) -> Any:
-    cur: Any = cfg
-    for part in dotted.split("."):
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(part)
-    return cur
-
-
-def _values_to_nested(values: dict[str, Any]) -> dict[str, Any]:
-    """{"combine.entry_threshold": 0.1} → {"combine": {"entry_threshold": 0.1}}"""
-    nested: dict[str, Any] = {}
-    for dotted, v in values.items():
-        cur = nested
-        parts = dotted.split(".")
-        for p in parts[:-1]:
-            cur = cur.setdefault(p, {})
-        cur[parts[-1]] = v
-    return nested
-
-
-def _validate_values(raw: Any) -> tuple[dict[str, Any] | None, str | None]:
-    """編集可能リストに対して型・範囲を検証し、正規化した values を返す。"""
-    if not isinstance(raw, dict):
-        return None, "values must be an object"
-    spec_by_path = {p["path"]: p for p in _EDITABLE_PARAMS}
-    out: dict[str, Any] = {}
-    for k, v in raw.items():
-        spec = spec_by_path.get(k)
-        if spec is None:
-            return None, f"editable でないキー: {k}"
-        if spec["type"] == "choice":
-            if v not in spec["choices"]:
-                return None, f"{k}: {v} は {spec['choices']} のいずれかを指定"
-            out[k] = v
-            continue
-        try:
-            num = float(v)
-        except (TypeError, ValueError):
-            return None, f"{k}: 数値ではありません"
-        if num < spec["min"] or num > spec["max"]:
-            return None, f"{k}: {spec['min']}〜{spec['max']} の範囲で指定"
-        out[k] = int(round(num)) if spec["type"] == "int" else num
-    # weight_model を変えたら weight_pattern も追従させる
-    if "combine.weight_model" in out:
-        out["combine.weight_pattern"] = round(1.0 - float(out["combine.weight_model"]), 4)
-    return out, None
 
 
 def create_app(config_path: Path | None = None) -> Flask:
@@ -1637,25 +1529,7 @@ def create_app(config_path: Path | None = None) -> Flask:
         if err:
             return jsonify({"error": err}), 400
         assert values is not None
-        existing: dict[str, Any] = {}
-        if local_cfg_path.exists():
-            try:
-                with open(local_cfg_path, encoding="utf-8") as f:
-                    existing = yaml.safe_load(f) or {}
-            except (OSError, yaml.YAMLError):
-                existing = {}
-        from ..config import _deep_merge
-
-        merged = _deep_merge(existing, _values_to_nested(values))
-        tmp = local_cfg_path.with_suffix(".yaml.tmp")
-        header = (
-            "# このファイルはダッシュボードの設定変更で自動更新されます。\n"
-            "# config.yaml と runtime_params.json より優先されます。\n"
-        )
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(header)
-            yaml.safe_dump(merged, f, allow_unicode=True, sort_keys=False)
-        os.replace(tmp, local_cfg_path)
+        write_local_overrides(local_cfg_path, values, source="dashboard")
         return jsonify({"ok": True, "written": str(local_cfg_path), "values": values})
 
     @app.post("/api/advice")
@@ -1759,6 +1633,17 @@ def create_app(config_path: Path | None = None) -> Flask:
             if whatif_job["status"] == "running":
                 out["elapsed_seconds"] = (_utc_ms() - whatif_job["started_ms"]) / 1000.0
         return jsonify(out)
+
+    @app.get("/api/autotune-history")
+    def api_autotune_history() -> Response:
+        try:
+            limit = int(request.args.get("limit", "20"))
+        except ValueError:
+            limit = 20
+        limit = max(1, min(100, limit))
+        hist_path = root / "data" / "auto_tune_history.jsonl"
+        rows = _tail_jsonl(hist_path, max_lines=limit)
+        return jsonify({"count": len(rows), "history": list(reversed(rows))})
 
     @app.get("/api/config-summary")
     def api_config_summary() -> Response:

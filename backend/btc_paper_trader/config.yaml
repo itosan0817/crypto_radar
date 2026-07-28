@@ -241,5 +241,28 @@ param_advisor:
   model: sonnet
   timeout_seconds: 240
 
+auto_tune:
+  # 日次締め時に Claude が候補提案→リスク審査→what-if検証→現行に勝った場合のみ
+  # config.local.yaml へ自動適用（Discord日次チャンネルへ通知、履歴は
+  # data/auto_tune_history.jsonl）。資金リスク系パラメータは対象外（手動のみ）。
+  enabled: true
+  # what-if 検証の期間（日）
+  eval_days: 14
+  # 1回の変更で許す現在値からの最大変化率（%）
+  max_change_pct: 25
+  # 採用候補に要求する検証期間中の最低取引数
+  min_trades_floor: 5
+  # 現行設定に対して要求する最低改善幅（initial_quote比%）。ノイズでの日次揺れを防ぐ
+  min_improvement_pct: 0.5
+  # Claude に提案させる候補数
+  candidates: 4
+  model: sonnet
+  reviewer_model: sonnet
+  timeout_seconds: 300
+  # 適用からこの日数経過後、実現PnLが initial_quote×rollback_loss_pct を
+  # 下回っていたら前回値へ自動ロールバック
+  rollback_after_days: 2
+  rollback_loss_pct: 0.02
+
 logging:
   jsonl_path: data/paper_events.jsonl

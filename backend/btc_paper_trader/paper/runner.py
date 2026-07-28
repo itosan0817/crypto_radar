@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -392,6 +393,16 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
                     run_daily_review(cfg, day_key=last_day_key)
                 except Exception as e:
                     print(f"[daily_review] unexpected error: {str(e)[:150]}")
+            # Claude 自動チューニング（提案→リスク審査→what-if検証→勝った場合のみ適用）。
+            # モデル学習を複数回行う重い処理のため、paperループを止めないよう別スレッドで実行。
+            if (cfg.get("auto_tune") or {}).get("enabled", False):
+                def _auto_tune_bg() -> None:
+                    try:
+                        from ..advisor.auto_tune import run_auto_tune
+                        run_auto_tune()
+                    except Exception as e:
+                        print(f"[auto_tune] unexpected error: {str(e)[:200]}")
+                threading.Thread(target=_auto_tune_bg, daemon=True).start()
 
         last_hour_key = hour_key
         last_day_key = day_key

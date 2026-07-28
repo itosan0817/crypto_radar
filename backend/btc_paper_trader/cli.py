@@ -51,6 +51,13 @@ def main() -> None:
     s_dash.add_argument("--host", type=str, default="127.0.0.1", help="Bind address (use 0.0.0.0 for LAN)")
     s_dash.add_argument("--port", type=int, default=8765)
 
+    s_at = sub.add_parser(
+        "autotune",
+        help="Claude auto-tune: propose -> risk review -> what-if validate -> apply if better",
+    )
+    s_at.add_argument("--config", type=Path, default=None)
+    s_at.add_argument("--dry-run", action="store_true", help="Evaluate but never write config.local.yaml")
+
     args = p.parse_args()
     cfg = load_config(args.config)
 
@@ -143,6 +150,13 @@ def main() -> None:
 
     if args.cmd == "dashboard":
         run_dashboard(host=args.host, port=args.port, config_path=args.config)
+        return
+
+    if args.cmd == "autotune":
+        from .advisor.auto_tune import run_auto_tune
+
+        result = run_auto_tune(cfg, dry_run=args.dry_run)
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         return
 
     if args.cmd == "notify-test":
