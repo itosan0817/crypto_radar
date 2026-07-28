@@ -82,6 +82,15 @@ sudo systemctl enable --now btc-dashboard
 
 以後は GitHub Actions のデプロイが `btc-dashboard.service` も自動で再起動します（ユニット未導入のサーバーでは何もしません）。
 
+#### 設定変更と What-if シミュレーション
+
+ダッシュボードの「設定」パネルから主要パラメータ（エントリー閾値・利確/損切り幅・投入資金割合など）を編集できます。
+
+- **保存して本番へ反映**: `config.local.yaml` に書き込まれ、稼働中の paper ループへ最大 `paper.reload_runtime_params_seconds`（既定300秒）で自動反映されます。再起動不要。保存値は `runtime_params.json`（自動チューニング）より優先されます。
+- **この設定で過去をシミュレート (What-if)**: 保存せずに、選択中の期間（1/3/7日）を仮設定で再シミュレートし、実績との比較表・チャートマーカー・資産推移の重ね描きを表示します。モデルを学習し直すため数十秒かかります。
+
+設定変更を保護したい場合は `backend/.env` に `DASHBOARD_TOKEN=任意の文字列` を設定してください。設定すると、保存・What-if 実行時に画面のトークン欄への入力が必要になります（閲覧は従来どおり制限なし）。
+
 ## 4. 定期 `fetch` + `tune`（自動パラメータ更新）
 
 グリッド探索で **TP/SL・`weight_model`・`entry_threshold`・`min_confidence`** を最後のウォークフォワード窓で評価し、改善時のみ `data/runtime_params.json` を更新します（`config.yaml` の `tune.skip_if_worse_than_current`）。Discord の **日次ウェブフック**に結果サマリが送られます（未設定なら送信されません）。

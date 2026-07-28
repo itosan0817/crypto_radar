@@ -316,8 +316,12 @@ class SimState:
     daily_pnl: float = 0.0
 
 
-def prepare_frame(cfg: dict[str, Any], db_path: Path | None = None) -> pd.DataFrame:
-    """Load or fetch klines, build MTF frame, features."""
+def prepare_frame(cfg: dict[str, Any], db_path: Path | None = None, offline: bool = False) -> pd.DataFrame:
+    """Load or fetch klines, build MTF frame, features.
+
+    offline=True の場合は Binance へのフェッチとキャッシュ書き込みを行わず、
+    sqlite キャッシュのみから構築する（別プロセスからの what-if 実行用）。
+    """
     sym = cfg["symbol"]
     base = cfg["base_url"]
     cache = package_root() / cfg["data"]["cache_sqlite"]
@@ -341,7 +345,7 @@ def prepare_frame(cfg: dict[str, Any], db_path: Path | None = None) -> pd.DataFr
             latest_open = int(df_disk["open_time"].iloc[-1])
             start_ms = max(0, latest_open - step_ms)
 
-        if now_ms > start_ms:
+        if not offline and now_ms > start_ms:
             new_df = fetch_klines_range(base, sym, iv, start_ms, now_ms)
             if not new_df.empty:
                 if df_disk.empty:

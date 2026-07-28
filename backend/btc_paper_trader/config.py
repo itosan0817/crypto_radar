@@ -79,12 +79,6 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
     with open(cfg_path, encoding="utf-8") as f:
         cfg: dict[str, Any] = yaml.safe_load(f) or {}
 
-    local = root / "config.local.yaml"
-    if local.exists():
-        with open(local, encoding="utf-8") as f:
-            local_cfg = yaml.safe_load(f) or {}
-        cfg = _deep_merge(cfg, local_cfg)
-
     use_runtime = bool(cfg.get("use_runtime_params", True))
     runtime = root / "data" / "runtime_params.json"
     if use_runtime and runtime.exists():
@@ -97,6 +91,14 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
             for key in ("risk", "combine", "filters"):
                 if key in rt and isinstance(rt[key], dict):
                     cfg = _deep_merge(cfg, {key: rt[key]})
+
+    # 手動オーバーライド（ダッシュボードの設定変更もここに書く）は
+    # 自動チューニング (runtime_params.json) より優先する
+    local = root / "config.local.yaml"
+    if local.exists():
+        with open(local, encoding="utf-8") as f:
+            local_cfg = yaml.safe_load(f) or {}
+        cfg = _deep_merge(cfg, local_cfg)
 
     return cfg
 
