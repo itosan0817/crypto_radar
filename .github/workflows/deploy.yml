@@ -25,8 +25,13 @@ jobs:
           sudo systemctl restart aerodrome-radar.service
           sudo systemctl restart bribe-sniper.service
           sudo systemctl restart btc-paper-trader.service
-          # ダッシュボードはユニット未導入のサーバーでも失敗しないようにする
-          sudo systemctl restart btc-dashboard.service 2>/dev/null || true
+          # ダッシュボードはユニット導入済みの場合のみ再起動（失敗は隠さずエラーにする）
+          if systemctl list-unit-files --type=service | grep -q '^btc-dashboard.service'; then
+            sudo systemctl restart btc-dashboard.service
+            sudo systemctl is-active btc-dashboard.service
+          else
+            echo "btc-dashboard.service not installed; skipping"
+          fi
 
       - name: Verify services are running
         run: |
