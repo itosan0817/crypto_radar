@@ -196,6 +196,14 @@ _DASH_HTML = """<!DOCTYPE html>
     }
     .adv-chip:hover { background: rgba(189, 135, 51, 0.25); }
     .form-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.9rem; align-items: center; }
+    .form-actions select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 0.2rem 0.4rem;
+      font-size: 0.78rem;
+    }
     #settings-status, #whatif-status { font-size: 0.78rem; color: var(--muted); }
     .marker-toggle { display: flex; gap: 0.25rem; align-items: center; font-size: 0.78rem; color: var(--muted); }
     .ind-row {
@@ -306,6 +314,15 @@ _DASH_HTML = """<!DOCTYPE html>
       </div>
       <div class="form-actions">
         <button class="btn primary" id="btn-save">保存して本番へ反映</button>
+        <label style="font-size:0.78rem;color:var(--muted)">期間:
+          <select id="whatif-hours">
+            <option value="24">1日</option>
+            <option value="72">3日</option>
+            <option value="168">7日</option>
+            <option value="336">14日</option>
+            <option value="720">30日</option>
+          </select>
+        </label>
         <button class="btn warn" id="btn-whatif">この設定で過去をシミュレート</button>
         <button class="btn" id="btn-advice">Claudeに参考値を聞く</button>
         <button class="btn warn" id="btn-apply-advice" style="display:none">参考値をすべて反映</button>
@@ -1022,11 +1039,12 @@ _DASH_HTML = """<!DOCTYPE html>
       if (c.error) { st.textContent = "✗ " + c.error; return; }
       rememberToken();
       st.textContent = "";
+      const whatifHours = parseInt(document.getElementById("whatif-hours").value, 10) || 24;
       try {
         const res = await fetch("/api/whatif", {
           method: "POST",
           headers: tokenHeaders(),
-          body: JSON.stringify({ values: c.values, hours: hours }),
+          body: JSON.stringify({ values: c.values, hours: whatifHours }),
         });
         const body = await res.json();
         if (!res.ok) {
@@ -1073,14 +1091,23 @@ _DASH_HTML = """<!DOCTYPE html>
       }, 2500);
     }
 
-    function renderWhatIf(result, rerenderOnly) {
+    async function renderWhatIf(result, rerenderOnly) {
       const sec = document.getElementById("whatif-section");
       sec.style.display = "block";
       lastWhatif = result;
       whatifTrades = result.trades || [];
       const wf = result.summary || {};
-      const act = computeStats(actualTrades);
-      const days = Math.round((result.hours || hours) / 24);
+      // 比較の「実績」はWhat-ifと同じ期間で集計する（表示中の期間と違うことがある）
+      let actTrades = actualTrades;
+      const whHours = result.hours || hours;
+      if (whHours !== hours) {
+        try {
+          const tr = await fetch("/api/trades?hours=" + whHours).then(function (r) { return r.json(); });
+          actTrades = tr.trades || [];
+        } catch (e) { /* 取得失敗時は表示中期間の実績で代用 */ }
+      }
+      const act = computeStats(actTrades);
+      const days = Math.round(whHours / 24);
       document.getElementById("whatif-title").textContent =
         "What-if シミュレーション結果（直近" + days + "日 / " + (result.n_bars || "—") + "バー）";
       if (!rerenderOnly) {
@@ -1532,7 +1559,7 @@ def create_app(config_path: Path | None = None) -> Flask:
             hours = int(request.args.get("hours", "24"))
         except ValueError:
             hours = 24
-        hours = max(1, min(24 * 14, hours))
+        hours = max(1, min(24 * 30, hours))
         since = _utc_ms() - hours * 3600 * 1000
         # 15分足=毎時4本 + 余裕。決済だけが期間内に入る取引も拾えるよう広めに読む
         max_lines = min(16000, hours * 4 + 800)
@@ -1684,7 +1711,7 @@ def create_app(config_path: Path | None = None) -> Flask:
             hours = int(body.get("hours", 24))
         except (TypeError, ValueError):
             hours = 24
-        hours = max(6, min(24 * 7, hours))
+        hours = max(6, min(24 * 30, hours))
 
         with whatif_lock:
             if whatif_job["status"] == "running":

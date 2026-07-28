@@ -34,7 +34,7 @@ def run_what_if(
         df = df[df["m15_close_time"] <= now_ms].reset_index(drop=True)
 
     n = len(df)
-    eval_bars = max(8, min(int(eval_bars), 2000))
+    eval_bars = max(8, min(int(eval_bars), 3000))
     # step_simulation は指標のルックバックがあるため十分な過去バーを確保する
     i0 = max(200, n - eval_bars)
     i1 = n - 1
