@@ -10,13 +10,19 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from ..advisor.claude_signal import get_claude_signal
 from ..advisor.daily_review import run_daily_review
 from ..advisor.entry_advisor import advise_entry
 from ..backtest.engine import SimState, prepare_frame, step_simulation, train_model_slice
 from ..config import load_config, package_root
 from ..data.binance_futures import INTERVAL_MS
 from ..eval.metrics import summarize_trades
-from ..notify.discord import post_claude_advice, post_daily_summary, post_hourly_summary
+from ..notify.discord import (
+    post_claude_advice,
+    post_claude_native_signal,
+    post_daily_summary,
+    post_hourly_summary,
+)
 
 
 def _utc_ms() -> int:
@@ -88,6 +94,13 @@ def _reason_ja(reason: str) -> str:
         "risk_guard_block": "リスク制限で新規停止",
         "hold_position": "保有中のため新規なし",
         "position_open": "保有中",
+        "claude_native": "Claude判断でエントリー",
+        "claude_below_threshold": "Claude自信度が閾値未満",
+        "claude_flat": "Claudeが様子見と判断",
+        "claude_call_failed": "Claude呼び出し失敗",
+        "cooldown": "連敗クールダウン中",
+        "stale_bar": "過去バーのため見送り",
+        "not_eligible": "新規建玉の対象外",
         "unknown": "不明",
     }
     return mapping.get(reason, reason)
@@ -196,7 +209,11 @@ def _maybe_claude_gate(
     エントリー候補 (pending) が立った直後に Claude セカンドオピニオンを取得する。
     mode=advise: 記録と通知のみ / mode=gate: veto ならエントリー中止。
     過去バーのリプレイ時は呼ばない（直近30分以内に確定したバーのみ対象）。
+    entry_mode=claude_native の時は無効（Claude自身が既に判断しているため二重に
+    セカンドオピニオンを求めない）。
     """
+    if str(cfg.get("entry_mode", "regression")) != "regression":
+        return
     adv_cfg = cfg.get("advisor") or {}
     if not adv_cfg.get("enabled", False):
         return
@@ -231,6 +248,47 @@ def _maybe_claude_gate(
     events.append({"type": "claude_advice", "blocked": blocked, **advice})
     if adv_cfg.get("notify", True):
         post_claude_advice(advice, blocked=blocked, mode=mode)
+
+
+def _resolve_claude_native_signal(
+    df: pd.DataFrame,
+    i: int,
+    sim: SimState,
+    cfg: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any] | None, str | None]:
+    """entry_mode=claude_native: このバーで新規建玉を検討してよいかを判定し、
+    妥当であれば Claude に問い合わせて engine.step_simulation 用の external_signal を作る。
+
+    戻り値: (external_signal, claude生の応答 or None, 見送り理由 or None)
+    claude生の応答が None の場合は通知を出さない（Claudeを呼んでいないため）。
+    """
+    no_op = {"direction": 0, "confidence": 0.0, "reason": "not_eligible"}
+    if sim.side != 0 or sim.pending != 0:
+        return no_op, None, None
+    if sim.halt_new_entries:
+        return {"direction": 0, "confidence": 0.0, "reason": "risk_guard_block"}, None, "risk_guard_block"
+    if i < sim.cooldown_first_allowed_i:
+        return {"direction": 0, "confidence": 0.0, "reason": "cooldown"}, None, "cooldown"
+    try:
+        close_time = int(df["m15_close_time"].iloc[i])
+        if _utc_ms() - close_time > 30 * 60 * 1000:
+            return no_op, None, "stale_bar"
+    except (KeyError, ValueError, TypeError):
+        return no_op, None, "stale_bar"
+
+    raw = get_claude_signal(df, i, sim, cfg)
+    if raw is None:
+        return no_op, None, "claude_call_failed"
+
+    cn_cfg = cfg.get("claude_native") or {}
+    threshold = float(cn_cfg.get("min_confidence", 70))
+    direction_map = {"long": 1, "short": -1, "flat": 0}
+    d = direction_map.get(raw["direction"], 0)
+    if d != 0 and raw["confidence"] >= threshold:
+        external = {"direction": d, "confidence": raw["confidence"] / 100.0, "reason": "claude_native"}
+        return external, raw, None
+    skip_reason = "claude_below_threshold" if d != 0 else None
+    return {"direction": 0, "confidence": 0.0, "reason": skip_reason or "claude_flat"}, raw, skip_reason
 
 
 def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> None:
@@ -297,6 +355,8 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
             last_cfg_reload = time.monotonic()
             signal_step_ms = INTERVAL_MS[cfg["intervals"]["signal"]]
 
+        entry_mode = str(cfg.get("entry_mode", "regression"))
+
         # 新しい足が閉じたかどうかを、Binanceへ問い合わせず壁時計だけで先に見積もる。
         # Kline は UTC 境界に整列するため計算だけで判定できる。閉じていなければ
         # prepare_frame（全期間の特徴量再構築・パターン検索）を丸ごとスキップし、
@@ -320,7 +380,12 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
 
             # 新しい足が確定していた場合のみ再学習する（壁時計の見積もりが Binance 側の
             # 反映遅延で先走ることがあるため、実データでも念のため確認する）。
-            if cached_model is None or current_ot != last_processed_ot:
+            # entry_mode=claude_native はモデル学習が不要（Claude自身が判断するため）。
+            if entry_mode == "claude_native":
+                cached_model = None
+                last_processed_ot = current_ot
+                cached_df = df
+            elif cached_model is None or current_ot != last_processed_ot:
                 i_train0 = max(0, n - train_window)
                 try:
                     cached_model = train_model_slice(df, cfg, i_train0, n - 1)
@@ -348,8 +413,29 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
             i = int(i)
             oti = int(ot.iloc[i])
             hourly_new_bars += 1
-            sim, events = step_simulation(df, cached_model, cfg, sim, i, None)
-            _maybe_claude_gate(df, i, sim, events, cfg)
+            if entry_mode == "claude_native":
+                external_signal, claude_raw, skip_reason = _resolve_claude_native_signal(df, i, sim, cfg)
+                sim, events = step_simulation(df, None, cfg, sim, i, None, external_signal=external_signal)
+                if claude_raw is not None:
+                    entered = any(e.get("type") == "entry" for e in events)
+                    cn_cfg = cfg.get("claude_native") or {}
+                    if cn_cfg.get("notify", True):
+                        post_claude_native_signal(
+                            claude_raw,
+                            entered=entered,
+                            skip_reason=skip_reason,
+                            threshold=float(cn_cfg.get("min_confidence", 70)),
+                            state_summary={
+                                "quote": sim.quote,
+                                "daily_pnl": sim.daily_pnl,
+                                "position": (
+                                    "FLAT" if sim.side == 0 else ("LONG" if sim.side == 1 else "SHORT")
+                                ),
+                            },
+                        )
+            else:
+                sim, events = step_simulation(df, cached_model, cfg, sim, i, None)
+                _maybe_claude_gate(df, i, sim, events, cfg)
             for e in events:
                 if e.get("type") == "entry":
                     hourly_entry_count += 1

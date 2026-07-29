@@ -257,10 +257,17 @@ def _entry_timing_confirm(side: int, regime: str, row: pd.Series, cfg: dict[str,
     return False, "entry_timing_1m_no_side"
 
 
-def _tier_position_and_risk(conf: float, cfg: dict[str, Any]) -> tuple[float, float, float, int]:
-    """Returns (position_fraction, tp_atr_mult, sl_atr_mult, max_hold_bars) for this confidence."""
+def _tier_position_and_risk(
+    conf: float, cfg: dict[str, Any], tier_cfg: dict[str, Any] | None = None
+) -> tuple[float, float, float, int]:
+    """Returns (position_fraction, tp_atr_mult, sl_atr_mult, max_hold_bars) for this confidence.
+
+    tier_cfg を渡すと risk.confidence_tier の代わりにそちらを使う
+    （entry_mode=claude_native は risk.confidence_tier とは別スケールの
+    claude_native.confidence_tier を使うため）。
+    """
     rcfg = cfg["risk"]
-    ct = rcfg.get("confidence_tier") or {}
+    ct = tier_cfg if tier_cfg is not None else (rcfg.get("confidence_tier") or {})
     base_pf = float(rcfg["position_fraction"])
     base_tp = float(rcfg["tp_atr_mult"])
     base_sl = float(rcfg["sl_atr_mult"])
@@ -306,6 +313,9 @@ class SimState:
     pending: int = 0
     pending_confidence: float = 0.0
     pending_regime: str = "trend"
+    # "regression"（従来のルールベース）か "claude_native"（entry_mode=claude_native）か。
+    # 建玉時にどちらの confidence_tier を使うかの判定にのみ使う。
+    pending_source: str = "regression"
     entry_max_hold_bars: int = 0
     entry_atr: float = 0.0
     partial_tp_done: bool = False
@@ -429,13 +439,21 @@ def prepare_frame(cfg: dict[str, Any], db_path: Path | None = None, offline: boo
 
 def step_simulation(
     df: pd.DataFrame,
-    model: DirectionModel,
+    model: DirectionModel | None,
     cfg: dict[str, Any],
     state: SimState,
     i: int,
     atr_series_full: pd.Series | None = None,
+    external_signal: dict[str, Any] | None = None,
 ) -> tuple[SimState, list[dict[str, Any]]]:
-    """Advance one bar index `i` (signal at i -> entry next open in same call chain as backtest loop)."""
+    """Advance one bar index `i` (signal at i -> entry next open in same call chain as backtest loop).
+
+    external_signal が渡された場合（entry_mode=claude_native）は、モデル/パターン/
+    レジーム判定によるシグナル生成を丸ごとスキップし、
+    {"direction": 1|-1|0, "confidence": 0-1, "reason": str} をそのまま使う。
+    建玉執行・TP/SL・部分利確・トレーリング・クールダウン・日次損失ガードなど
+    それ以外のロジックは regression モードと完全に共通。
+    """
     i = int(i)
     scfg = signal_config_from_dict(cfg)
     rcfg = cfg["risk"]
@@ -464,6 +482,7 @@ def step_simulation(
     pending = state.pending
     pending_confidence = state.pending_confidence
     pending_regime = state.pending_regime
+    pending_source = state.pending_source
     entry_max_hold_bars = state.entry_max_hold_bars
     entry_atr = state.entry_atr
     partial_tp_done = state.partial_tp_done
@@ -516,7 +535,12 @@ def step_simulation(
             )
         else:
             fill = o * (1.0 + slip * pending)
-            pos_frac, tp_m, sl_m, mh_trade = _tier_position_and_risk(pending_confidence, cfg)
+            tier_cfg = (
+                (cfg.get("claude_native") or {}).get("confidence_tier")
+                if pending_source == "claude_native"
+                else None
+            )
+            pos_frac, tp_m, sl_m, mh_trade = _tier_position_and_risk(pending_confidence, cfg, tier_cfg)
             notional = quote * pos_frac
             qty = notional / fill
             entry_px = fill
@@ -700,25 +724,35 @@ def step_simulation(
             )
             return new_state, events
 
-        X = df.iloc[[i]][feats]
-        try:
-            p_up = float(model.predict_proba_up(X)[0])
-        except Exception:
-            p_up = 0.5
-        pat = float(row.get("pattern_score", 0.0) or 0.0)
-        if np.isnan(pat):
-            pat = 0.0
-        if _is_range_regime(row, cfg):
-            regime = "range"
-            if _is_range_breakout(atr_hist, row, cfg):
-                signal_value = 0
-                signal_reason = "range_breakout_guard"
-                sig_conf = 0.0
-            else:
-                signal_value, signal_reason = _grid_signal_with_reason(row, cfg)
-                sig_conf = 1.0 if signal_value != 0 else 0.0
+        if external_signal is not None:
+            # entry_mode=claude_native: モデル/パターン/レジーム判定を一切使わず、
+            # 呼び出し側（Claudeネイティブシグナル）の判断をそのまま使う。
+            signal_value = int(external_signal.get("direction", 0))
+            sig_conf = float(external_signal.get("confidence", 0.0))
+            signal_reason = str(external_signal.get("reason", "claude_native"))
+            regime = "trend"
+            pending_source = "claude_native"
         else:
-            signal_value, signal_reason, sig_conf = gate_signal_with_reason(row, p_up, pat, atr, atr_hist, scfg)
+            X = df.iloc[[i]][feats]
+            try:
+                p_up = float(model.predict_proba_up(X)[0])
+            except Exception:
+                p_up = 0.5
+            pat = float(row.get("pattern_score", 0.0) or 0.0)
+            if np.isnan(pat):
+                pat = 0.0
+            if _is_range_regime(row, cfg):
+                regime = "range"
+                if _is_range_breakout(atr_hist, row, cfg):
+                    signal_value = 0
+                    signal_reason = "range_breakout_guard"
+                    sig_conf = 0.0
+                else:
+                    signal_value, signal_reason = _grid_signal_with_reason(row, cfg)
+                    sig_conf = 1.0 if signal_value != 0 else 0.0
+            else:
+                signal_value, signal_reason, sig_conf = gate_signal_with_reason(row, p_up, pat, atr, atr_hist, scfg)
+            pending_source = "regression"
         pending = signal_value
         pending_confidence = float(sig_conf) if signal_value != 0 else 0.0
         pending_regime = regime if signal_value != 0 else "trend"
@@ -744,6 +778,7 @@ def step_simulation(
         pending=pending,
         pending_confidence=pending_confidence,
         pending_regime=pending_regime,
+        pending_source=pending_source,
         entry_max_hold_bars=entry_max_hold_bars,
         entry_atr=entry_atr,
         partial_tp_done=partial_tp_done,

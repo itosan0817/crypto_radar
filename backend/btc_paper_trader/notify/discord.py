@@ -92,6 +92,51 @@ def post_claude_advice(advice: dict[str, Any], blocked: bool, mode: str) -> None
     _post_webhook(url, {"embeds": [embed]})
 
 
+def post_claude_native_signal(
+    raw: dict[str, Any],
+    entered: bool,
+    skip_reason: str | None,
+    threshold: float,
+    state_summary: dict[str, Any],
+) -> None:
+    """entry_mode=claude_native: 毎時(=毎バー確定ごと)のClaude判断を1通で通知する"""
+    url = env_webhook_hourly()
+    if not url:
+        return
+    direction = str(raw.get("direction", "flat"))
+    dir_ja = {"long": "ロング", "short": "ショート", "flat": "様子見"}.get(direction, direction)
+    confidence = raw.get("confidence", 0)
+    if entered:
+        title_emoji, status_ja = "✅", "エントリーしました"
+    elif direction == "flat":
+        title_emoji, status_ja = "💤", "様子見（Claude自身の判断）"
+    else:
+        reason_ja = {
+            "claude_below_threshold": f"自信度が閾値({threshold:.0f}%)未満のため見送り",
+            "risk_guard_block": "日次損失ガードにより新規停止中",
+            "cooldown": "連敗クールダウン中",
+        }.get(skip_reason or "", skip_reason or "見送り")
+        title_emoji, status_ja = "⏸️", reason_ja
+    embed: dict[str, Any] = {
+        "title": f"{title_emoji} Claude判断 — {dir_ja} (自信度 {confidence}%)",
+        "description": f"**{status_ja}**",
+        "fields": [
+            {"name": "判断理由", "value": str(raw.get("reasoning", "-"))[:1000], "inline": False},
+            {
+                "name": "口座状況",
+                "value": (
+                    f"評価額: {state_summary.get('quote', 0):.2f} USDT / "
+                    f"本日実現PnL: {state_summary.get('daily_pnl', 0):.2f} / "
+                    f"現在ポジション: {state_summary.get('position', 'FLAT')}"
+                ),
+                "inline": False,
+            },
+        ],
+        "footer": {"text": f"model={raw.get('model', '-')} / {raw.get('latency_sec', '-')}s / 閾値={threshold:.0f}%"},
+    }
+    _post_webhook(url, {"embeds": [embed]})
+
+
 def post_tune_result(
     text: str,
     fields: list[dict[str, Any]] | None = None,

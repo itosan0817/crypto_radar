@@ -251,6 +251,20 @@ def run_auto_tune(
     min_trades_floor = int(at_cfg.get("min_trades_floor", 5))
     bph = bars_per_hour(str(cfg["intervals"]["signal"]))
 
+    entry_mode = str(cfg.get("entry_mode", "regression"))
+    if entry_mode != "regression":
+        rec = {
+            "t": _utc_ms(), "type": "tune", "applied": False, "dry_run": dry_run,
+            "reason": f"entry_mode={entry_mode} のため回帰パラメータのチューニング対象外",
+        }
+        _append_history(history_path, rec)
+        if notify:
+            post_daily_summary(
+                f"➖ 自動チューニング: entry_mode={entry_mode} のため回帰ベースのパラメータは"
+                "チューニング対象外としてスキップしました。"
+            )
+        return {"action": "skipped_entry_mode", **rec}
+
     # ⑥ まずロールバック判定（戻した日は新たな変更をしない）
     rb = None if dry_run else _maybe_rollback(cfg, at_cfg, history_path, log_path)
     if rb is not None:

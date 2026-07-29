@@ -13,6 +13,12 @@ from typing import Any
 import yaml
 
 EDITABLE_PARAMS: list[dict[str, Any]] = [
+    {"path": "entry_mode", "label": "エントリーモード", "type": "choice",
+     "choices": ["regression", "claude_native"], "auto": False,
+     "help": "claude_native = 回帰分析を使わず、Claude自身が方向と自信度を判断"},
+    {"path": "claude_native.min_confidence", "label": "Claude自信度閾値(%)", "type": "int",
+     "min": 0, "max": 100, "step": 1, "auto": False,
+     "help": "この値未満は様子見。claude_nativeモード時のみ有効"},
     {"path": "combine.entry_threshold", "label": "エントリー閾値", "type": "float",
      "min": 0.0, "max": 1.0, "step": 0.01, "auto": True, "help": "小さいほど取引が増える"},
     {"path": "combine.weight_model", "label": "モデル比重", "type": "float",

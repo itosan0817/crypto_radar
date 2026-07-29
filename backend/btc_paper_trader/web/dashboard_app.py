@@ -307,6 +307,11 @@ _DASH_HTML = """<!DOCTYPE html>
         <span id="settings-status"></span>
       </div>
       <p class="chart-note" id="advice-comment" style="display:none"></p>
+      <p class="chart-note" id="claude-native-note" style="display:none;color:var(--whatif)">
+        ⚠ 現在 entry_mode=claude_native です。What-if シミュレーションと Claude自動チューニングは
+        回帰ベース戦略のみに対応しており、Claude判断モードの成績は事前検証できません
+        （Claude自身の判断を安価に再現する手段が無いため）。実運用の結果で判断してください。
+      </p>
       <p class="chart-note" id="settings-note"></p>
     </section>
     <section>
@@ -802,6 +807,9 @@ _DASH_HTML = """<!DOCTYPE html>
       document.getElementById("settings-note").textContent =
         "保存すると config.local.yaml に書き込まれ、稼働中のpaperループに最大" +
         Math.round((res.reload_seconds || 300) / 60) + "分で自動反映されます（再起動不要）。保存値は自動チューニングより優先されます。";
+      const entryModeParam = settingsSpec.find(function (p) { return p.path === "entry_mode"; });
+      document.getElementById("claude-native-note").style.display =
+        entryModeParam && entryModeParam.value === "claude_native" ? "block" : "none";
     }
 
     function collectValues() {

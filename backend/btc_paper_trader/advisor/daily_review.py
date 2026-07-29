@@ -98,6 +98,16 @@ def _collect_day(cfg: dict[str, Any], day_key: str) -> dict[str, Any] | None:
 def _params_snapshot(cfg: dict[str, Any]) -> dict[str, Any]:
     """Claude に渡す現在の主要パラメータ（改善提案の材料）"""
     risk = cfg.get("risk") or {}
+    entry_mode = str(cfg.get("entry_mode", "regression"))
+    if entry_mode != "regression":
+        cn = cfg.get("claude_native") or {}
+        return {
+            "entry_mode": entry_mode,
+            "claude_confidence_threshold_pct": cn.get("min_confidence"),
+            "confidence_tier": cn.get("confidence_tier"),
+            "max_daily_loss_pct": risk.get("max_daily_loss_pct"),
+            "cooldown_after_losses": risk.get("cooldown_after_losses"),
+        }
     filters = cfg.get("filters") or {}
     combine = cfg.get("combine") or {}
     grid = cfg.get("grid") or {}
@@ -131,6 +141,15 @@ def run_daily_review(cfg: dict[str, Any], day_key: str | None = None, post: bool
         return None
 
     iv_label = interval_label_ja(str(cfg.get("intervals", {}).get("signal", "15m")))
+    entry_mode = str(cfg.get("entry_mode", "regression"))
+    if entry_mode == "claude_native":
+        strategy_desc = (
+            f"戦略は{iv_label}ベース。ルールベースのシグナルは使わず、毎バーClaude自身が"
+            "ロング/ショート/様子見と自信度(0-100)を判断し、閾値を超えた場合のみエントリーする"
+            "（回帰分析・パターンマッチングは現在停止中）。"
+        )
+    else:
+        strategy_desc = f"戦略は{iv_label}ベース。トレンド時はモデル+パターン合成、レンジ時はグリッド逆張り。"
     prompt = f"""
 あなたはBTC先物(USDT-M)の自動売買システムのトレードコーチです。
 以下は当システムの {day_key} (UTC) のペーパートレード実績です。
@@ -145,7 +164,7 @@ def run_daily_review(cfg: dict[str, Any], day_key: str | None = None, post: bool
 【補足】
 - block_reasons はシグナルが出たがフィルターで見送った理由の集計。
 - n_claude_veto はAIセカンドオピニオンが拒否推奨した件数。
-- 戦略は{iv_label}ベース。トレンド時はモデル+パターン合成、レンジ時はグリッド逆張り。
+- {strategy_desc}
 
 【出力要件】
 以下の要素を持つJSONのみを出力してください（日本語）。JSON以外の文章やコードフェンスは含めないでください:

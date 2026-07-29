@@ -2,6 +2,11 @@ use_runtime_params: true
 symbol: BTCUSDT
 base_url: https://fapi.binance.com
 
+# regression = 従来のモデル+パターン合成によるルールベースのシグナル生成。
+# claude_native = 回帰分析を使わず、Claude自身が毎バー long/short/flat と
+# 自信度を判断する（案3の実験）。ダッシュボードからいつでも切替可能。
+entry_mode: claude_native
+
 intervals:
   # 基準足。列名プレフィックス "m15_" はこの基準足を指す内部固定名（後方互換のため）
   signal: 1h
@@ -221,6 +226,7 @@ news_filter:
 # 優先順位: config.yaml < runtime_params.json < config.local.yaml（ダッシュボードの設定保存先）
 
 # Claude Code CLI (サブスク認証・API課金なし) によるAIアドバイザー
+# entry_mode=regression の時のみ動作（claude_native では二重になるため自動的に無効）
 advisor:
   # エントリー候補が立った時に Claude へセカンドオピニオンを求める
   enabled: true
@@ -231,6 +237,27 @@ advisor:
   timeout_seconds: 120
   log_path: data/claude_advice.jsonl
   notify: true
+
+# entry_mode=claude_native 専用: Claude自身がルールベースを介さず
+# long/short/flat と自信度(0-100)を直接判断する（案3）
+claude_native:
+  # この値(%)未満は様子見扱い。ダッシュボードの「エントリーモード」設定パネルから変更可能
+  min_confidence: 70
+  model: sonnet
+  timeout_seconds: 120
+  # 閾値未満の判断も含め毎回記録する（後から異なる閾値での再検証に使う）
+  log_path: data/claude_native_signal.jsonl
+  # 毎バー確定ごとにDiscordへ判断内容を通知する（1時間足なら実質1時間に1回）
+  notify: true
+  confidence_tier:
+    enabled: true
+    # risk.confidence_tier とは別スケール（confは0-1、min_confidence=70%未満は
+    # そもそもエントリーしないため実質0.70〜1.00の範囲だけが該当する）
+    thresholds: [0.80, 0.90, 1.01]
+    position_fraction: [0.5, 0.75, 0.98]
+    tp_atr_mult_scale: [0.9, 1.0, 1.05]
+    sl_atr_mult_scale: [1.05, 1.0, 0.95]
+    max_hold_bars_scale: [0.85, 1.0, 1.0]
 
 notify:
   # 毎時サマリのDiscord通知。日次サマリ・日次レビュー・自動チューニング通知が
