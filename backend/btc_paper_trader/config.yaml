@@ -249,6 +249,9 @@ claude_native:
   log_path: data/claude_native_signal.jsonl
   # 毎バー確定ごとにDiscordへ判断内容を通知する（1時間足なら実質1時間に1回）
   notify: true
+  # Claude呼び出しがこの回数連続で失敗したらDiscordへアラート（使用上限到達などに気づくため）。
+  # 以後は同じ回数ごと(3,6,9...)に再アラートし、復旧時にも1回通知する
+  failure_alert_threshold: 3
   confidence_tier:
     enabled: true
     # risk.confidence_tier とは別スケール（confは0-1、min_confidence=70%未満は

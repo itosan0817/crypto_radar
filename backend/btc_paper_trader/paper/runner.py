@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from ..advisor.claude_signal import get_claude_signal
+from ..advisor.claude_signal import get_claude_signal, get_last_error
 from ..advisor.daily_review import run_daily_review
 from ..advisor.entry_advisor import advise_entry
 from ..backtest.engine import SimState, prepare_frame, step_simulation, train_model_slice
@@ -19,6 +19,7 @@ from ..data.binance_futures import INTERVAL_MS
 from ..eval.metrics import summarize_trades
 from ..notify.discord import (
     post_claude_advice,
+    post_claude_native_failure_alert,
     post_claude_native_signal,
     post_daily_summary,
     post_hourly_summary,
@@ -342,6 +343,8 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
     hourly_entry_long_count = int(raw.get("hourly_entry_long_count", 0))
     hourly_entry_short_count = int(raw.get("hourly_entry_short_count", 0))
 
+    claude_native_consecutive_failures = 0
+
     last_processed_ot = 0
     cached_df = None
     cached_model = None
@@ -415,10 +418,26 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
             hourly_new_bars += 1
             if entry_mode == "claude_native":
                 external_signal, claude_raw, skip_reason = _resolve_claude_native_signal(df, i, sim, cfg)
+                cn_cfg = cfg.get("claude_native") or {}
+                if skip_reason == "claude_call_failed":
+                    claude_native_consecutive_failures += 1
+                    fail_threshold = int(cn_cfg.get("failure_alert_threshold", 3))
+                    if (
+                        claude_native_consecutive_failures >= fail_threshold
+                        and claude_native_consecutive_failures % fail_threshold == 0
+                    ):
+                        post_claude_native_failure_alert(
+                            claude_native_consecutive_failures, get_last_error(), recovered=False
+                        )
+                elif claude_raw is not None:
+                    if claude_native_consecutive_failures >= int(cn_cfg.get("failure_alert_threshold", 3)):
+                        post_claude_native_failure_alert(
+                            claude_native_consecutive_failures, None, recovered=True
+                        )
+                    claude_native_consecutive_failures = 0
                 sim, events = step_simulation(df, None, cfg, sim, i, None, external_signal=external_signal)
                 if claude_raw is not None:
                     entered = any(e.get("type") == "entry" for e in events)
-                    cn_cfg = cfg.get("claude_native") or {}
                     if cn_cfg.get("notify", True):
                         post_claude_native_signal(
                             claude_raw,

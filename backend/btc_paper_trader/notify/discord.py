@@ -137,6 +137,36 @@ def post_claude_native_signal(
     _post_webhook(url, {"embeds": [embed]})
 
 
+def post_claude_native_failure_alert(
+    consecutive_failures: int,
+    last_error: str | None,
+    recovered: bool,
+) -> None:
+    """entry_mode=claude_native: Claude呼び出しが連続失敗/復旧した時にアラートする
+    （使用上限到達などで新規エントリー判断が止まっていることに気づけるようにするため）"""
+    url = env_webhook_hourly()
+    if not url:
+        return
+    if recovered:
+        embed: dict[str, Any] = {
+            "title": "✅ Claude呼び出しが復旧しました",
+            "description": f"直前まで {consecutive_failures} 回連続で失敗していましたが、正常に応答が返るようになりました。",
+        }
+    else:
+        embed = {
+            "title": "🚨 Claude呼び出しが連続で失敗しています",
+            "description": (
+                f"**{consecutive_failures}回連続**で失敗中です。使用上限（サブスクリプションの利用上限）に"
+                "到達している可能性があります。この間、新規エントリー判断は行われません"
+                "（保有中ポジションのTP/SL監視は影響を受けず継続します）。"
+            ),
+            "fields": [
+                {"name": "直近のエラー", "value": str(last_error or "-")[:1000], "inline": False},
+            ],
+        }
+    _post_webhook(url, {"embeds": [embed]})
+
+
 def post_tune_result(
     text: str,
     fields: list[dict[str, Any]] | None = None,

@@ -23,6 +23,15 @@ from .claude_cli import extract_json, find_cli, run_claude
 
 RECENT_BARS = 24
 
+_last_error: str | None = None
+
+
+def get_last_error() -> str | None:
+    """直近の get_claude_signal 呼び出しが失敗していた場合の理由（成功時は None）。
+    連続失敗のDiscordアラートで、失敗内容をそのまま伝えるために使う。
+    """
+    return _last_error
+
 
 def _fmt(v: Any, nd: int = 2) -> str:
     try:
@@ -62,8 +71,10 @@ def get_claude_signal(
     cfg: dict[str, Any],
 ) -> dict[str, Any] | None:
     """市況だけを見てClaudeにロング/ショート/様子見と自信度を判断させる。失敗時は None。"""
+    global _last_error
     cn_cfg = cfg.get("claude_native") or {}
     if not find_cli():
+        _last_error = "claude CLI not found"
         return None
 
     iv_label = interval_label_ja(str(cfg.get("intervals", {}).get("signal", "1h")))
@@ -95,8 +106,10 @@ def get_claude_signal(
         text = run_claude(prompt, model=model, timeout=timeout)
         raw = extract_json(text)
     except Exception as e:
-        print(f"[claude_native] signal call failed: {str(e)[:150]}")
+        _last_error = str(e)[:200]
+        print(f"[claude_native] signal call failed: {_last_error}")
         return None
+    _last_error = None
     latency = time.monotonic() - t0
 
     direction = str(raw.get("direction", "flat")).lower()
