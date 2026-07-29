@@ -4,7 +4,7 @@ import json
 import os
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -191,7 +191,6 @@ _DASH_HTML = """<!DOCTYPE html>
       font-size: 0.78rem;
     }
     #settings-status, #whatif-status { font-size: 0.78rem; color: var(--muted); }
-    .marker-toggle { display: flex; gap: 0.25rem; align-items: center; font-size: 0.78rem; color: var(--muted); }
     .ind-row {
       display: flex;
       flex-wrap: wrap;
@@ -240,20 +239,14 @@ _DASH_HTML = """<!DOCTYPE html>
       <button data-cur="USDT" class="active">USDT</button>
       <button data-cur="JPY">円</button>
     </div>
-    <div class="marker-toggle" id="marker-toggle" style="display:none">
-      <span>チャートのマーカー:</span>
-      <button class="btn" data-src="actual">実績</button>
-      <button class="btn" data-src="whatif">What-if</button>
-    </div>
     <span id="status">読み込み中…</span>
     <a href="/api/state" target="_blank" rel="noopener">state</a>
-    <a href="/api/trades?hours=24" target="_blank" rel="noopener">trades</a>
   </div>
 
   <div class="tiles" id="tiles"></div>
 
   <section>
-    <h2 id="price-title">値動きと売買ポイント</h2>
+    <h2 id="price-title">値動き</h2>
     <div class="ind-row" id="ind-row">
       <label><span class="sw" style="background:#3d8fd1"></span><input type="checkbox" data-ind="sma20" /> SMA20</label>
       <label><span class="sw" style="background:#bd8733"></span><input type="checkbox" data-ind="ema9" /> EMA9</label>
@@ -273,10 +266,7 @@ _DASH_HTML = """<!DOCTYPE html>
     </div>
     <div id="osc-chart" style="display:none"></div>
     <p class="chart-note">
-      <span class="mk pos">▲</span> ロング建玉
-      <span class="mk neg">▼</span> ショート建玉
-      <span class="mk">●</span> 決済（緑=利益 / 赤=損失、数字は損益）
-      <span id="marker-note"></span>
+      <a href="/trades" target="_blank" rel="noopener">📋 取引履歴を別ウィンドウで開く →</a>
     </p>
   </section>
 
@@ -348,26 +338,6 @@ _DASH_HTML = """<!DOCTYPE html>
   </section>
 
   <section>
-    <h2>取引履歴（実績）</h2>
-    <div class="scroll-x">
-      <table>
-        <thead>
-          <tr>
-            <th>エントリー (JST)</th>
-            <th>決済 (JST)</th>
-            <th>方向</th>
-            <th>建値</th>
-            <th>決済値</th>
-            <th>損益</th>
-            <th>理由</th>
-          </tr>
-        </thead>
-        <tbody id="trades-body"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <section>
     <h2>Claude 自動チューニング履歴</h2>
     <p class="chart-note">毎日の日次締め（09:00 JST頃）に、Claudeが候補を提案 → バックテストで検証 → 現行設定に勝った場合のみ自動適用します。資金リスク系（投入資金割合・日次最大損失率）は自動調整の対象外です。</p>
     <div class="scroll-x">
@@ -391,7 +361,7 @@ _DASH_HTML = """<!DOCTYPE html>
     const JST_OFFSET = 9 * 3600;
     let hours = 24;
     let priceChart = null, candleSeries = null, equityChart = null, equitySeries = null, whatifSeries = null;
-    let actualTrades = [], whatifTrades = [], markerSource = "actual";
+    let actualTrades = [], whatifTrades = [];
     let settingsSpec = [];
     let lastAdvice = null;
     let whatifTimer = null, adviceTimer = null;
@@ -408,7 +378,7 @@ _DASH_HTML = """<!DOCTYPE html>
     try { ind = JSON.parse(localStorage.getItem("dash_ind")); } catch (e) { ind = null; }
     ind = ind || {};
     ind = { sma20: !!ind.sma20, ema9: !!ind.ema9, ema21: !!ind.ema21, bb: !!ind.bb, osc: ind.osc || "none" };
-    let convCandles = [], candleTimes = null;
+    let convCandles = [];
     let overlaySeries = {};
     let chartBase = null;
     let oscChart = null, oscSeries = {};
@@ -550,63 +520,6 @@ _DASH_HTML = """<!DOCTYPE html>
       }).join("");
     }
 
-    function markerPriceText(px) {
-      if (px == null) return "";
-      if (jpy()) return Math.round(px * fx.rate / 10000) + "万";
-      return String(Math.round(px));
-    }
-    function markerPnlText(pnl) {
-      if (pnl == null) return "";
-      if (jpy()) {
-        const v = Math.round(pnl * fx.rate);
-        return (v >= 0 ? "+" : "") + v.toLocaleString("ja-JP");
-      }
-      return (pnl >= 0 ? "+" : "") + pnl.toFixed(1);
-    }
-
-    function buildMarkers(trades, minT) {
-      // 選択中の足の開始時刻に丸めてマーカーを置く（該当ローソクが無ければ出さない）
-      const step = IV_MS[lastIv] || 900000;
-      function snap(ms) {
-        const tt = toChartTime(Math.floor(ms / step) * step);
-        if (tt < minT) return null;
-        if (candleTimes && !candleTimes.has(tt)) return null;
-        return tt;
-      }
-      const markers = [];
-      trades.forEach(function (t) {
-        if (t.entry_time != null && !t.partial) {
-          const tt = snap(t.entry_time);
-          if (tt != null) markers.push({
-            time: tt,
-            position: t.side === 1 ? "belowBar" : "aboveBar",
-            color: t.side === 1 ? POS : NEG,
-            shape: t.side === 1 ? "arrowUp" : "arrowDown",
-            text: (t.side === 1 ? "L " : "S ") + markerPriceText(t.entry_px),
-          });
-        }
-        if (t.exit_time != null) {
-          const tt = snap(t.exit_time);
-          if (tt != null) markers.push({
-            time: tt,
-            position: t.side === 1 ? "aboveBar" : "belowBar",
-            color: (t.pnl || 0) >= 0 ? POS : NEG,
-            shape: "circle",
-            text: markerPnlText(t.pnl),
-          });
-        }
-      });
-      markers.sort(function (a, b) { return a.time - b.time; });
-      return markers;
-    }
-
-    let chartMinT = 0;
-    function applyMarkers() {
-      if (!candleSeries) return;
-      const src = markerSource === "whatif" ? whatifTrades : actualTrades;
-      candleSeries.setMarkers(buildMarkers(src, chartMinT));
-    }
-
     function renderChart(klines) {
       if (!candleSeries) return;
       const candles = klines.map(function (k) {
@@ -617,12 +530,7 @@ _DASH_HTML = """<!DOCTYPE html>
         };
       });
       convCandles = candles;
-      candleTimes = new Set(candles.map(function (c) { return c.time; }));
       candleSeries.setData(candles);
-      chartMinT = candles.length ? candles[0].time : 0;
-      applyMarkers();
-      document.getElementById("marker-note").textContent =
-        lastIv === "15m" ? "" : "／ ※マーカーは" + (IV_LABEL[lastIv] || lastIv) + "の位置に丸めて表示";
       updateIndicators();
       priceChart.timeScale().fitContent();
     }
@@ -843,7 +751,6 @@ _DASH_HTML = """<!DOCTYPE html>
       if (lastState) { renderTiles(lastState, actualTrades); renderStatePanel(lastState); }
       renderChart(lastKlines);
       renderEquity(lastEquity);
-      document.getElementById("trades-body").innerHTML = tradesRowsHtml(actualTrades);
       if (lastWhatif) renderWhatIf(lastWhatif, true);
     }
 
@@ -1148,17 +1055,6 @@ _DASH_HTML = """<!DOCTYPE html>
         document.getElementById("equity-legend").style.display = "flex";
         equityChart.timeScale().fitContent();
       }
-
-      document.getElementById("marker-toggle").style.display = "flex";
-      if (!rerenderOnly) markerSource = "whatif";
-      updateMarkerToggle();
-      applyMarkers();
-    }
-
-    function updateMarkerToggle() {
-      document.querySelectorAll("#marker-toggle button").forEach(function (b) {
-        b.classList.toggle("primary", b.dataset.src === markerSource);
-      });
     }
 
     // ---- 自動チューニング履歴 ----
@@ -1227,11 +1123,10 @@ _DASH_HTML = """<!DOCTYPE html>
         lastEquity = tRes.equity || [];
         lastIv = kRes.interval || ivSel;
         document.getElementById("price-title").textContent =
-          (kRes.symbol || "BTCUSDT") + " " + (IV_LABEL[lastIv] || lastIv) + " — 値動きと売買ポイント";
+          (kRes.symbol || "BTCUSDT") + " " + (IV_LABEL[lastIv] || lastIv);
         renderTiles(state, actualTrades);
         renderChart(lastKlines);
         renderEquity(lastEquity);
-        document.getElementById("trades-body").innerHTML = tradesRowsHtml(actualTrades);
         renderStatePanel(state);
         loadAutotune();
         st.textContent = "最終更新: " + new Date().toLocaleTimeString("ja-JP") + " JST" +
@@ -1248,7 +1143,7 @@ _DASH_HTML = """<!DOCTYPE html>
         lastKlines = kRes.klines || [];
         lastIv = kRes.interval || ivSel;
         document.getElementById("price-title").textContent =
-          (kRes.symbol || "BTCUSDT") + " " + (IV_LABEL[lastIv] || lastIv) + " — 値動きと売買ポイント";
+          (kRes.symbol || "BTCUSDT") + " " + (IV_LABEL[lastIv] || lastIv);
         renderChart(lastKlines);
       } catch (e) {
         document.getElementById("status").textContent = "チャート読み込み失敗: " + e;
@@ -1285,13 +1180,6 @@ _DASH_HTML = """<!DOCTYPE html>
       const b = ev.target.closest("button");
       if (b) setCurrency(b.dataset.cur);
     });
-    document.getElementById("marker-toggle").addEventListener("click", function (ev) {
-      const b = ev.target.closest("button");
-      if (!b) return;
-      markerSource = b.dataset.src;
-      updateMarkerToggle();
-      applyMarkers();
-    });
     document.getElementById("settings-form").addEventListener("click", function (ev) {
       const chip = ev.target.closest(".adv-chip");
       if (chip) applyAdviceChip(chip);
@@ -1324,9 +1212,357 @@ _DASH_HTML = """<!DOCTYPE html>
 </html>
 """
 
+_TRADES_HTML = """<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BTC Paper Trader — 取引履歴</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --text: #e7ecf3;
+      --muted: #8b98a8;
+      --accent: #3d8fd1;
+      --pos: #3ecf8e;
+      --neg: #e06c75;
+      --border: #2a3545;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 1rem 1.25rem 2rem;
+      line-height: 1.5;
+    }
+    h1 { font-size: 1.15rem; font-weight: 600; margin: 0 0 0.25rem; }
+    .sub { color: var(--muted); font-size: 0.82rem; margin-bottom: 1rem; }
+    .sub a { color: var(--accent); text-decoration: none; }
+    .sub a:hover { text-decoration: underline; }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.9rem 1rem;
+      margin-top: 0.9rem;
+    }
+    .filter-row { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-bottom: 0.6rem; }
+    .filter-row:last-child { margin-bottom: 0; }
+    .filter-label { font-size: 0.75rem; color: var(--muted); margin-right: 0.15rem; }
+    button, select, input {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 6px;
+      padding: 0.3rem 0.6rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    select, input[type="date"] { color: var(--text); cursor: default; background: var(--bg); }
+    button.active {
+      background: rgba(61, 143, 209, 0.18);
+      border-color: var(--accent);
+      color: var(--text);
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    #custom-range { display: none; gap: 0.4rem; align-items: center; }
+    #status { font-size: 0.78rem; color: var(--muted); margin-left: auto; }
+    .scroll-x { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    th, td {
+      text-align: right;
+      padding: 0.45rem 0.5rem;
+      border-bottom: 1px solid var(--border);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+    th { color: var(--muted); font-weight: 500; }
+    tr:hover td { background: rgba(255,255,255,0.03); }
+    .pill {
+      display: inline-block;
+      padding: 0.1rem 0.5rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .pill.long { background: rgba(62, 207, 142, 0.15); color: var(--pos); }
+    .pill.short { background: rgba(224, 108, 117, 0.15); color: var(--neg); }
+    .pill.flat { background: rgba(139, 152, 168, 0.2); color: var(--muted); }
+    .mono { font-family: ui-monospace, monospace; font-size: 0.78rem; }
+    .pos { color: var(--pos); }
+    .neg { color: var(--neg); }
+    .pager { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.75rem; font-size: 0.8rem; flex-wrap: wrap; }
+    .pager .count { color: var(--muted); margin-left: auto; }
+    @media (max-width: 640px) {
+      .filter-row { gap: 0.3rem; }
+      button, select, input { font-size: 0.78rem; padding: 0.28rem 0.5rem; }
+      #status { margin-left: 0; width: 100%; }
+      .pager .count { margin-left: 0; width: 100%; order: 3; }
+    }
+  </style>
+</head>
+<body>
+  <h1>取引履歴</h1>
+  <p class="sub"><a href="/">← ダッシュボードへ戻る</a> · 時刻は日本時間 (JST)</p>
+
+  <section>
+    <div class="filter-row" id="range-row">
+      <span class="filter-label">期間:</span>
+      <button data-range="today">今日</button>
+      <button data-range="7d">7日</button>
+      <button data-range="30d" class="active">30日</button>
+      <button data-range="90d">90日</button>
+      <button data-range="180d">180日</button>
+      <button data-range="all">全期間</button>
+      <button data-range="custom">カスタム</button>
+      <span id="custom-range">
+        <input type="date" id="f-from" />〜<input type="date" id="f-to" />
+        <button id="btn-apply-range">適用</button>
+      </span>
+    </div>
+    <div class="filter-row">
+      <span class="filter-label">方向:</span>
+      <select id="f-side">
+        <option value="all">すべて</option>
+        <option value="long">ロング</option>
+        <option value="short">ショート</option>
+      </select>
+      <span class="filter-label" style="margin-left:0.5rem">決済理由:</span>
+      <select id="f-reason">
+        <option value="all">すべて</option>
+        <option value="tp">利確</option>
+        <option value="sl">損切り</option>
+        <option value="time">時間切れ</option>
+        <option value="partial_tp">部分利確</option>
+        <option value="open">保有中</option>
+      </select>
+      <span class="filter-label" style="margin-left:0.5rem">表示件数:</span>
+      <select id="f-pagesize">
+        <option value="20">20</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+      </select>
+      <span id="status">読み込み中…</span>
+    </div>
+  </section>
+
+  <section>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr>
+            <th>エントリー (JST)</th>
+            <th>決済 (JST)</th>
+            <th>方向</th>
+            <th>建値</th>
+            <th>決済値</th>
+            <th>損益 (USDT)</th>
+            <th>理由</th>
+          </tr>
+        </thead>
+        <tbody id="trades-body"></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <button id="btn-prev">« 前へ</button>
+      <span id="page-indicator">1 / 1</span>
+      <button id="btn-next">次へ »</button>
+      <span class="count" id="total-count"></span>
+    </div>
+  </section>
+
+  <script>
+    const REASON_JA = { sl: "損切り", tp: "利確", time: "時間切れ", partial_tp: "部分利確" };
+    let state = { range: "today", side: "all", reason: "all", pageSize: 50, page: 1 };
+    try {
+      const saved = JSON.parse(localStorage.getItem("trades_filters"));
+      if (saved) state = Object.assign(state, saved, { page: 1 });
+    } catch (e) { /* ignore */ }
+
+    function fmtJst(ms) {
+      if (ms == null) return "—";
+      const d = new Date(ms + 9 * 3600 * 1000);
+      return d.toISOString().slice(5, 16).replace("T", " ");
+    }
+    function fmtNum(v, digits) {
+      if (v == null || isNaN(v)) return "—";
+      return Number(v).toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    }
+    function pnlHtml(v) {
+      if (v == null) return "—";
+      const cls = v >= 0 ? "pos" : "neg";
+      return '<span class="' + cls + '">' + (v >= 0 ? "+" : "") + fmtNum(v, 2) + "</span>";
+    }
+    function sideLabel(s) {
+      if (s === 1) return '<span class="pill long">LONG</span>';
+      if (s === -1) return '<span class="pill short">SHORT</span>';
+      return '<span class="pill flat">FLAT</span>';
+    }
+    function todayJst() {
+      const d = new Date(Date.now() + 9 * 3600 * 1000);
+      return d.toISOString().slice(0, 10);
+    }
+
+    function saveFilters() {
+      localStorage.setItem("trades_filters", JSON.stringify({
+        range: state.range, side: state.side, reason: state.reason, pageSize: state.pageSize,
+        from: state.from, to: state.to,
+      }));
+    }
+
+    async function load() {
+      const st = document.getElementById("status");
+      st.textContent = "読み込み中…";
+      const params = new URLSearchParams({
+        range: state.range, side: state.side, reason: state.reason,
+        page: state.page, page_size: state.pageSize,
+      });
+      if (state.range === "custom") {
+        if (state.from) params.set("from", state.from);
+        if (state.to) params.set("to", state.to);
+      }
+      try {
+        const res = await fetch("/api/trades/search?" + params.toString()).then(function (r) { return r.json(); });
+        if (res.error) { st.textContent = "✗ " + res.error; return; }
+        renderTable(res.trades || []);
+        state.page = res.page;
+        const totalPages = Math.max(1, res.total_pages || 1);
+        document.getElementById("page-indicator").textContent = res.page + " / " + totalPages;
+        document.getElementById("total-count").textContent = "全 " + res.total + " 件";
+        document.getElementById("btn-prev").disabled = res.page <= 1;
+        document.getElementById("btn-next").disabled = res.page >= totalPages;
+        st.textContent = "最終更新: " + new Date().toLocaleTimeString("ja-JP") + " JST";
+      } catch (e) {
+        st.textContent = "読み込み失敗: " + e;
+      }
+    }
+
+    function renderTable(trades) {
+      const tbody = document.getElementById("trades-body");
+      if (!trades.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted)">該当する取引はありません</td></tr>';
+        return;
+      }
+      tbody.innerHTML = trades.map(function (t) {
+        const reason = REASON_JA[t.reason] || t.reason || "—";
+        return "<tr>" +
+          '<td class="mono">' + fmtJst(t.entry_time) + "</td>" +
+          '<td class="mono">' + (t.open ? '<span class="pill flat">保有中</span>' : fmtJst(t.exit_time)) + "</td>" +
+          "<td>" + sideLabel(t.side) + (t.partial ? ' <span style="color:var(--muted);font-size:0.7rem">½</span>' : "") + "</td>" +
+          "<td>" + fmtNum(t.entry_px, 1) + "</td>" +
+          "<td>" + fmtNum(t.exit_px, 1) + "</td>" +
+          "<td>" + pnlHtml(t.pnl) + "</td>" +
+          "<td>" + (t.open ? "—" : reason) + "</td>" +
+          "</tr>";
+      }).join("");
+    }
+
+    document.getElementById("range-row").addEventListener("click", function (ev) {
+      const b = ev.target.closest("button[data-range]");
+      if (!b) return;
+      state.range = b.dataset.range;
+      state.page = 1;
+      document.querySelectorAll("#range-row button[data-range]").forEach(function (x) {
+        x.classList.toggle("active", x.dataset.range === state.range);
+      });
+      const custom = document.getElementById("custom-range");
+      if (state.range === "custom") {
+        custom.style.display = "inline-flex";
+        if (!state.from) state.from = todayJst();
+        if (!state.to) state.to = todayJst();
+        document.getElementById("f-from").value = state.from;
+        document.getElementById("f-to").value = state.to;
+      } else {
+        custom.style.display = "none";
+        saveFilters();
+        load();
+      }
+    });
+    document.getElementById("btn-apply-range").addEventListener("click", function () {
+      state.from = document.getElementById("f-from").value || todayJst();
+      state.to = document.getElementById("f-to").value || todayJst();
+      state.page = 1;
+      saveFilters();
+      load();
+    });
+    document.getElementById("f-side").addEventListener("change", function (ev) {
+      state.side = ev.target.value; state.page = 1; saveFilters(); load();
+    });
+    document.getElementById("f-reason").addEventListener("change", function (ev) {
+      state.reason = ev.target.value; state.page = 1; saveFilters(); load();
+    });
+    document.getElementById("f-pagesize").addEventListener("change", function (ev) {
+      state.pageSize = parseInt(ev.target.value, 10) || 50; state.page = 1; saveFilters(); load();
+    });
+    document.getElementById("btn-prev").addEventListener("click", function () {
+      if (state.page > 1) { state.page -= 1; load(); }
+    });
+    document.getElementById("btn-next").addEventListener("click", function () {
+      state.page += 1; load();
+    });
+
+    document.querySelectorAll("#range-row button[data-range]").forEach(function (x) {
+      x.classList.toggle("active", x.dataset.range === state.range);
+    });
+    document.getElementById("f-side").value = state.side;
+    document.getElementById("f-reason").value = state.reason;
+    document.getElementById("f-pagesize").value = String(state.pageSize);
+    if (state.range === "custom") {
+      document.getElementById("custom-range").style.display = "inline-flex";
+      document.getElementById("f-from").value = state.from || todayJst();
+      document.getElementById("f-to").value = state.to || todayJst();
+    }
+    load();
+  </script>
+</body>
+</html>
+"""
+
 
 def _utc_ms() -> int:
     return int(datetime.now(timezone.utc).timestamp() * 1000)
+
+
+_JST = timezone(timedelta(hours=9))
+
+
+def _jst_date_to_ms(date_str: str, end_of_day: bool = False) -> int | None:
+    """"YYYY-MM-DD"（JST基準の暦日）をUTCミリ秒に変換する。end_of_day=Trueなら翌日0時（排他的上限）。"""
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=_JST)
+    except (ValueError, TypeError):
+        return None
+    if end_of_day:
+        d += timedelta(days=1)
+    return int(d.timestamp() * 1000)
+
+
+def _resolve_trade_range(args: Any, now_ms: int) -> tuple[int, int, str | None]:
+    """クエリパラメータから (from_ms, to_ms, error) を解決する。"""
+    range_key = str(args.get("range", "30d"))
+    if range_key == "today":
+        today = datetime.now(_JST).strftime("%Y-%m-%d")
+        return _jst_date_to_ms(today) or 0, now_ms, None
+    if range_key == "all":
+        return 0, now_ms, None
+    if range_key == "custom":
+        from_s = args.get("from")
+        to_s = args.get("to")
+        from_ms = _jst_date_to_ms(from_s) if from_s else 0
+        to_ms = _jst_date_to_ms(to_s, end_of_day=True) if to_s else now_ms
+        if from_ms is None or to_ms is None:
+            return 0, now_ms, "from/to は YYYY-MM-DD 形式で指定してください"
+        return from_ms, min(to_ms, now_ms + 1), None
+    days_map = {"7d": 7, "30d": 30, "90d": 90, "180d": 180}
+    days = days_map.get(range_key)
+    if days is None:
+        return 0, now_ms, f"unknown range: {range_key}"
+    return now_ms - days * 86_400_000, now_ms, None
 
 
 def create_app(config_path: Path | None = None) -> Flask:
@@ -1366,6 +1602,10 @@ def create_app(config_path: Path | None = None) -> Flask:
     @app.get("/")
     def index() -> str:
         return _DASH_HTML
+
+    @app.get("/trades")
+    def trades_page() -> str:
+        return _TRADES_HTML
 
     @app.get("/api/state")
     def api_state() -> Response:
@@ -1478,6 +1718,61 @@ def create_app(config_path: Path | None = None) -> Flask:
             "total_pnl": sum(t.get("pnl") or 0 for t in visible),
         }
         return jsonify({"hours": hours, "summary": summary, "trades": visible, "equity": equity})
+
+    @app.get("/api/trades/search")
+    def api_trades_search() -> Response:
+        """取引履歴ページ用: 期間・方向・決済理由で絞り込み、ページネーションして返す。"""
+        now_ms = _utc_ms()
+        from_ms, to_ms, err = _resolve_trade_range(request.args, now_ms)
+        if err:
+            return jsonify({"error": err})
+
+        side_f = str(request.args.get("side", "all"))
+        reason_f = str(request.args.get("reason", "all"))
+        try:
+            page = max(1, int(request.args.get("page", "1")))
+        except ValueError:
+            page = 1
+        try:
+            page_size = int(request.args.get("page_size", "50"))
+        except ValueError:
+            page_size = 50
+        page_size = max(1, min(200, page_size))
+
+        # 8MBチャンク上限までの全履歴（実運用の稼働期間なら十分カバーできる）から
+        # エントリー/決済を組み直し、その後に期間・条件で絞り込む
+        records = _tail_jsonl(log_path, max_lines=200_000)
+        trades, open_tr = _build_trades(records)
+        if open_tr is not None:
+            trades.append({**open_tr, "exit_time": None, "exit_px": None, "pnl": None,
+                           "reason": None, "partial": False, "open": True})
+
+        def in_range(t: dict[str, Any]) -> bool:
+            ts = t.get("exit_time") or t.get("entry_time") or 0
+            return from_ms <= ts < to_ms
+
+        filtered = [t for t in trades if in_range(t)]
+        if side_f == "long":
+            filtered = [t for t in filtered if t.get("side") == 1]
+        elif side_f == "short":
+            filtered = [t for t in filtered if t.get("side") == -1]
+        if reason_f == "open":
+            filtered = [t for t in filtered if t.get("open")]
+        elif reason_f != "all":
+            filtered = [t for t in filtered if not t.get("open") and t.get("reason") == reason_f]
+
+        filtered.sort(key=lambda t: t.get("exit_time") or t.get("entry_time") or 0, reverse=True)
+        total = len(filtered)
+        total_pages = max(1, -(-total // page_size))  # ceil
+        page = min(page, total_pages)
+        start = (page - 1) * page_size
+        page_rows = filtered[start : start + page_size]
+
+        return jsonify({
+            "trades": page_rows, "total": total, "page": page,
+            "page_size": page_size, "total_pages": total_pages,
+            "from_ms": from_ms, "to_ms": to_ms,
+        })
 
     @app.get("/api/fxrate")
     def api_fxrate() -> Response:
