@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from sniper.safe_io import safe_print
+from safe_io import safe_print
 try:
     from dotenv import load_dotenv
 except ModuleNotFoundError:

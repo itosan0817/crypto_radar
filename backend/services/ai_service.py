@@ -4,7 +4,7 @@ import os
 import shutil
 import subprocess
 from config.settings import CLAUDE_CLI_PATH, CLAUDE_FAST_MODEL, CLAUDE_DEEP_MODEL
-from sniper.safe_io import safe_print
+from safe_io import safe_print
 
 class AIService:
     """

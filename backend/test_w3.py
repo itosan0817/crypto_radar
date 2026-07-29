@@ -1,7 +1,7 @@
 import asyncio
 from web3 import AsyncWeb3
 from web3.providers import WebSocketProvider
-from sniper.safe_io import safe_print
+from safe_io import safe_print
 
 ALCHEMY_BASE_WSS_URL = 'wss://base-mainnet.g.alchemy.com/v2/lcau4KV3k-6quLk___bH2'
 

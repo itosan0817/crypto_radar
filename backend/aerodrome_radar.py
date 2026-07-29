@@ -16,7 +16,7 @@ from web3 import AsyncWeb3
 from web3.providers import WebSocketProvider
 from config.settings import ALCHEMY_BASE_WSS_URL
 from core.event_handler import handle_call_scheduled, handle_call_executed
-from sniper.safe_io import safe_print
+from safe_io import safe_print
 
 # ==========================================
 # 監視対象の代表的なイベントシグネチャのトピックハッシュ

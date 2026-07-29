@@ -5,7 +5,7 @@ from core.pricing import get_t0_price_and_slippage, get_current_price
 from services.ai_service import AIService
 from services.discord_service import DiscordService
 from services.firebase_service import FirebaseService
-from sniper.safe_io import safe_print
+from safe_io import safe_print
 
 async def handle_call_scheduled(w3: AsyncWeb3, log: dict):
     """

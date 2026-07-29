@@ -10,7 +10,7 @@ from core.event_handler import handle_call_scheduled, handle_call_executed
 from services.firebase_service import FirebaseService
 from web3.providers import WebSocketProvider
 from config.settings import ALCHEMY_BASE_WSS_URL
-from sniper.safe_io import safe_print
+from safe_io import safe_print
 
 async def run_test_scenario():
     """

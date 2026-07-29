@@ -23,7 +23,6 @@ jobs:
       - name: Restart services
         run: |
           sudo systemctl restart aerodrome-radar.service
-          sudo systemctl restart bribe-sniper.service
           sudo systemctl restart btc-paper-trader.service
           # ダッシュボードはユニット導入済みの場合のみ再起動（失敗は隠さずエラーにする）
           # 要: sudoers に btc-dashboard.service の NOPASSWD 許可（deploy/gcp/README.md 参照）
@@ -38,5 +37,4 @@ jobs:
         run: |
           sleep 5
           sudo systemctl is-active aerodrome-radar.service
-          sudo systemctl is-active bribe-sniper.service
           sudo systemctl is-active btc-paper-trader.service

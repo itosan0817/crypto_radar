@@ -2,7 +2,7 @@ import datetime
 import requests
 import pytz
 from config.settings import DISCORD_WEBHOOK_URL, TZ_JST
-from sniper.safe_io import safe_print
+from safe_io import safe_print
 
 class DiscordService:
     """

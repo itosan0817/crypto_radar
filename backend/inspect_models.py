@@ -1,7 +1,7 @@
 import google.generativeai as genai
 import sys
 import os
-from sniper.safe_io import safe_print
+from safe_io import safe_print
 
 # プロジェクトのルートをパスに追加
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))

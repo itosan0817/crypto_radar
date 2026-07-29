@@ -17,7 +17,5 @@ def test_webhook(name, url):
         print(f"Error testing {name}: {e}")
 
 radar_url = os.getenv("RADAR_WEBHOOK_URL")
-bribe_url = os.getenv("BRIBE_WEBHOOK_URL")
 
 test_webhook("Radar Webhook", radar_url)
-test_webhook("Bribe Webhook", bribe_url)
