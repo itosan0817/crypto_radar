@@ -3,10 +3,10 @@ symbol: BTCUSDT
 base_url: https://fapi.binance.com
 
 intervals:
-  signal: 15m
+  # 基準足。列名プレフィックス "m15_" はこの基準足を指す内部固定名（後方互換のため）
+  signal: 1h
+  # 基準足自身は自動でフェッチ対象に含まれるため、ここには上位足だけを書く
   features:
-    - 15m
-    - 1h
     - 4h
     - 1d
 
@@ -15,8 +15,8 @@ data:
 
 regression:
   lookback_bars:
+    # m15 は基準足（現在は1h）自身の回帰特徴量
     m15: 96
-    "1h": 72
     "4h": 60
     "1d": 60
 
@@ -60,7 +60,9 @@ filters:
 risk:
   tp_atr_mult: 1.8
   sl_atr_mult: 1.2
-  max_hold_bars: 48
+  # 1h足換算で約1日分。基準足を15m→1hへ変更した際に48(=12h)から再スケール。
+  # 以後は Claude 自動チューニングが検証しながら調整する
+  max_hold_bars: 24
   position_fraction: 0.98
   # リスクガードによる新規停止を減らすため一時的に緩和
   max_daily_loss_pct: 0.08
@@ -103,7 +105,7 @@ walk_forward:
 
 paper:
   # 新しい足が閉じたかは壁時計で判定するため、この値は「反応の速さ」だけに影響する
-  # （15分足に対して30〜60秒はどちらでも実用上の差は小さい）
+  # （1時間足に対して60秒程度のポーリングは実用上ほぼ無視できる遅延）
   poll_seconds: 60
   timezone: Asia/Tokyo
   train_window_bars: 5000
@@ -142,7 +144,7 @@ regime:
 
 grid:
   enabled: true
-  # レンジ中心は15m終値EMA
+  # レンジ中心は基準足終値EMA
   center_ema_window: 48
   # 中心からこのATR倍率を超えたら逆張りエントリー
   step_atr_mult: 0.6

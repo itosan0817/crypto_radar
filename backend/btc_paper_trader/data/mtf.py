@@ -40,13 +40,18 @@ def merge_asof_left(
 def build_mtf_frame(
     m15: pd.DataFrame,
     frames: dict[str, pd.DataFrame],
+    signal_interval: str = "15m",
 ) -> pd.DataFrame:
     """
-    Align higher TF OHLCV to 15m bars using as-of on **close_time** of HTF candles.
+    Align higher TF OHLCV to the signal (base) bars using as-of on **close_time** of HTF candles.
+
+    `m15` は実際には `cfg.intervals.signal` で設定した足（例: 1h）のデータで、
+    列名プレフィックス "m15_" は後方互換のための内部固定名（= "現在の基準足"）。
+    `signal_interval` は `frames` の中から自分自身を二重マージしないためのキー。
 
     `m15` must include `close_time`. Each HTF frame must include `close_time`.
-    For each 15m row at time T, we use the last HTF candle with close_time <= T (typically
-    the last fully closed higher-TF bar at that moment).
+    For each base-timeframe row at time T, we use the last HTF candle with close_time <= T
+    (typically the last fully closed higher-TF bar at that moment).
     """
     base = m15.copy()
     base = base.sort_values("close_time").reset_index(drop=True)
@@ -66,7 +71,7 @@ def build_mtf_frame(
     )
 
     for name, df in frames.items():
-        if name == "15m":
+        if name == signal_interval:
             continue
         h = df.sort_values("close_time").reset_index(drop=True)
         h2 = _prep_htf(h, name)

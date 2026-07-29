@@ -18,6 +18,7 @@ from typing import Any
 import pandas as pd
 
 from ..config import package_root
+from ..data.binance_futures import interval_label_ja
 from .claude_cli import extract_json, find_cli, run_claude
 
 RECENT_BARS = 16
@@ -33,7 +34,7 @@ def _fmt(v: Any, nd: int = 2) -> str:
     return f"{f:.{nd}f}"
 
 
-def _build_snapshot(df: pd.DataFrame, i: int) -> str:
+def _build_snapshot(df: pd.DataFrame, i: int, iv_label: str) -> str:
     """直近バーの値動きと指標をコンパクトなテキストにする"""
     lo = max(0, i - RECENT_BARS + 1)
     rows = []
@@ -55,14 +56,14 @@ def _build_snapshot(df: pd.DataFrame, i: int) -> str:
     except (TypeError, ValueError):
         pass
     indicators = (
-        f"ATR比率(15m): {_fmt(row.get('m15_atr_ratio'), 5)} / "
-        f"1hトレンド傾き: {_fmt(row.get('1h_slope'), 5)} / "
+        f"ATR比率({iv_label}): {_fmt(row.get('m15_atr_ratio'), 5)} / "
+        f"{iv_label}自身のトレンド傾き: {_fmt(row.get('m15_slope'), 5)} / "
         f"4hトレンド傾き: {_fmt(row.get('4h_slope'), 5)} / "
         f"Funding(8h): {_fmt(row.get('funding_rate'), 6)} / "
         f"パターンスコア: {_fmt(row.get('pattern_score'), 3)} / "
         f"レンジ中心からの乖離: {center_dist or 'n/a'}"
     )
-    return "直近15分足 (UTC):\n" + "\n".join(rows) + "\n\n指標:\n" + indicators
+    return f"直近{iv_label} (UTC):\n" + "\n".join(rows) + "\n\n指標:\n" + indicators
 
 
 def advise_entry(
@@ -82,8 +83,9 @@ def advise_entry(
     regime = str(decision.get("regime", "unknown"))
     reason = str(decision.get("reason", "unknown"))
     confidence = float(getattr(sim_state, "pending_confidence", 0.0))
+    iv_label = interval_label_ja(str(cfg.get("intervals", {}).get("signal", "15m")))
 
-    snapshot = _build_snapshot(df, i)
+    snapshot = _build_snapshot(df, i, iv_label)
     prompt = f"""
 あなたはBTC先物(USDT-M)の短期トレードのリスク管理専門家です。
 ルールベースの売買システムがエントリー候補を出しました。
@@ -93,7 +95,7 @@ def advise_entry(
 方向: {side_ja}
 シグナル根拠: {reason} (レジーム判定: {regime})
 システム確信度: {confidence:.3f}
-執行予定: 次の15分足の始値で成行
+執行予定: 次の{iv_label}の始値で成行
 
 【市況スナップショット】
 {snapshot}

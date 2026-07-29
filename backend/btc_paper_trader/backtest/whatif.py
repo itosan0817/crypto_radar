@@ -21,7 +21,7 @@ def run_what_if(
     eval_bars: int = 96,
     train_bars: int = 5000,
 ) -> dict[str, Any]:
-    """直近 eval_bars 本の15分足を、オーバーライド適用後の設定で再シミュレートする。
+    """直近 eval_bars 本（cfg.intervals.signal の足）を、オーバーライド適用後の設定で再シミュレートする。
 
     戻り値の records は paper_events.jsonl と同じ形
     （bar_open_time / quote / events）なので、取引ペアリングを共用できる。

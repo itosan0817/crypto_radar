@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ..config import package_root
+from ..data.binance_futures import interval_label_ja
 from ..notify.discord import post_daily_summary
 from .claude_cli import extract_json, find_cli, run_claude
 
@@ -129,6 +130,7 @@ def run_daily_review(cfg: dict[str, Any], day_key: str | None = None, post: bool
         print(f"[daily_review] no records for {day_key}; skip")
         return None
 
+    iv_label = interval_label_ja(str(cfg.get("intervals", {}).get("signal", "15m")))
     prompt = f"""
 あなたはBTC先物(USDT-M)の自動売買システムのトレードコーチです。
 以下は当システムの {day_key} (UTC) のペーパートレード実績です。
@@ -143,7 +145,7 @@ def run_daily_review(cfg: dict[str, Any], day_key: str | None = None, post: bool
 【補足】
 - block_reasons はシグナルが出たがフィルターで見送った理由の集計。
 - n_claude_veto はAIセカンドオピニオンが拒否推奨した件数。
-- 戦略は15分足ベース。トレンド時はモデル+パターン合成、レンジ時はグリッド逆張り。
+- 戦略は{iv_label}ベース。トレンド時はモデル+パターン合成、レンジ時はグリッド逆張り。
 
 【出力要件】
 以下の要素を持つJSONのみを出力してください（日本語）。JSON以外の文章やコードフェンスは含めないでください:

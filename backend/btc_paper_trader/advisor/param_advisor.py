@@ -8,6 +8,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from ..data.binance_futures import interval_label_ja
 from .claude_cli import extract_json, run_claude
 
 
@@ -52,8 +53,9 @@ def advise_params(
     model = str(adv_cfg.get("model", "sonnet"))
     timeout = int(adv_cfg.get("timeout_seconds", 240))
 
+    iv_label = interval_label_ja(str(cfg.get("intervals", {}).get("signal", "15m")))
     prompt = f"""
-あなたはBTC永久先物(USDT-M)の短期売買Bot(15分足、ロング/ショート両対応、ATRベースのTP/SL)の
+あなたはBTC永久先物(USDT-M)の売買Bot({iv_label}、ロング/ショート両対応、ATRベースのTP/SL)の
 パラメータチューニング専門家です。ペーパートレーディングの直近成績を踏まえ、
 編集可能な各パラメータの推奨値を提案してください。
 

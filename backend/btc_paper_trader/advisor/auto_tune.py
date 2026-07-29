@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import load_config, package_root
+from ..data.binance_futures import bars_per_hour, interval_label_ja
 from ..eval.trade_log import build_trades, period_stats, tail_jsonl
 from ..notify.discord import post_daily_summary
 from ..settings_spec import (
@@ -109,8 +110,9 @@ def _clamp_to_delta(
 def _propose(cfg: dict[str, Any], stats: dict[str, Any], at_cfg: dict[str, Any]) -> dict[str, Any]:
     n_cand = int(at_cfg.get("candidates", 4))
     max_pct = float(at_cfg.get("max_change_pct", 25))
+    iv_label = interval_label_ja(str(cfg.get("intervals", {}).get("signal", "15m")))
     prompt = f"""
-あなたはBTC永久先物Bot(15分足、ATRベースTP/SL、ロング/ショート両対応)のパラメータ最適化担当です。
+あなたはBTC永久先物Bot({iv_label}、ATRベースTP/SL、ロング/ショート両対応)のパラメータ最適化担当です。
 直近成績を踏まえ、バックテスト検証にかける候補パラメータセットを最大{n_cand}個提案してください。
 
 【変更してよいパラメータ】
@@ -247,6 +249,7 @@ def run_auto_tune(
     eval_days = int(at_cfg.get("eval_days", 14))
     max_pct = float(at_cfg.get("max_change_pct", 25))
     min_trades_floor = int(at_cfg.get("min_trades_floor", 5))
+    bph = bars_per_hour(str(cfg["intervals"]["signal"]))
 
     # ⑥ まずロールバック判定（戻した日は新たな変更をしない）
     rb = None if dry_run else _maybe_rollback(cfg, at_cfg, history_path, log_path)
@@ -263,7 +266,7 @@ def run_auto_tune(
     # ① 診断
     days = 7
     since = _utc_ms() - days * 86_400_000
-    records = tail_jsonl(log_path, max_lines=min(16000, days * 96 + 800))
+    records = tail_jsonl(log_path, max_lines=min(16000, int(days * 24 * bph) + 800))
     stats = period_stats(records, since, days)
 
     # ② 仮説
@@ -301,7 +304,7 @@ def run_auto_tune(
     # ④ 検証（現行 + 生き残り候補を同条件で）
     from ..backtest.whatif import run_what_if
 
-    eval_bars = eval_days * 96
+    eval_bars = int(eval_days * 24 * bph)
     baseline = run_what_if(cfg, {}, eval_bars=eval_bars)
     baseline_score = _score(baseline["summary"], q0)
     for c in survivors:

@@ -31,6 +31,21 @@ INTERVAL_MS: dict[str, int] = {
     "1w": 604_800_000,
 }
 
+INTERVAL_LABEL_JA: dict[str, str] = {
+    "1m": "1分足", "3m": "3分足", "5m": "5分足", "15m": "15分足", "30m": "30分足",
+    "1h": "1時間足", "2h": "2時間足", "4h": "4時間足", "6h": "6時間足", "8h": "8時間足",
+    "12h": "12時間足", "1d": "日足", "3d": "3日足", "1w": "週足",
+}
+
+
+def bars_per_hour(interval: str) -> float:
+    """指定インターバルの1時間あたりのバー本数（15m→4, 1h→1 など）。"""
+    return 3_600_000 / INTERVAL_MS[interval]
+
+
+def interval_label_ja(interval: str) -> str:
+    return INTERVAL_LABEL_JA.get(interval, interval)
+
 
 def _ensure_db(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -166,7 +166,9 @@ def _is_range_regime(row: pd.Series, cfg: dict[str, Any]) -> bool:
     rc = cfg.get("regime") or {}
     if not bool(rc.get("enabled", False)):
         return False
-    s1h = float(row.get("1h_slope", 0.0) or 0.0)
+    # "m15_slope" は基準足（cfg.intervals.signal）自身の傾き。
+    # 基準足が 1h の場合、旧来の「1h_slope」相当はこちらで代替される。
+    s1h = float(row.get("m15_slope", 0.0) or 0.0)
     s4h = float(row.get("4h_slope", 0.0) or 0.0)
     atr_ratio = float(row.get("m15_atr_ratio", 0.0) or 0.0)
     return (
@@ -329,9 +331,16 @@ def prepare_frame(cfg: dict[str, Any], db_path: Path | None = None, offline: boo
         cache = db_path
 
     feats_iv = cfg["intervals"]["features"]
-    bars = {"1m": 12000, "15m": 20000, "1h": 3000, "4h": 1800, "1d": 1200}
+    signal_iv = cfg["intervals"]["signal"]
+    # 基準足（cfg.intervals.signal）は train_window_bars を十分カバーできる深さで
+    # フェッチする必要があるため、他の足より大きめの既定値を持たせている
+    bars = {"1m": 12000, "15m": 20000, "1h": 20000, "4h": 1800, "1d": 1200}
     dfs: dict[str, pd.DataFrame] = {}
-    fetch_intervals = list(dict.fromkeys(list(feats_iv) + (["1m"] if (cfg.get("entry_timing_1m") or {}).get("enabled", False) else [])))
+    # 基準足は intervals.features に重複列挙しなくても常にフェッチ対象へ含める
+    fetch_intervals = list(dict.fromkeys(
+        [signal_iv] + list(feats_iv)
+        + (["1m"] if (cfg.get("entry_timing_1m") or {}).get("enabled", False) else [])
+    ))
     for iv in fetch_intervals:
         target_nb = bars.get(iv, 1000)
         df_disk = load_from_sqlite(cache, sym, iv)
@@ -377,8 +386,8 @@ def prepare_frame(cfg: dict[str, Any], db_path: Path | None = None, offline: boo
         one["1m_recent_low"] = one["low"].rolling(breakout_n, min_periods=1).min().shift(1)
         dfs["1m"] = one
 
-    m15 = dfs["15m"].copy()
-    merged = build_mtf_frame(m15, dfs)
+    m15 = dfs[signal_iv].copy()
+    merged = build_mtf_frame(m15, dfs, signal_interval=signal_iv)
     lb = cfg["regression"]["lookback_bars"]
     merged = add_regression_features(merged, lb)
     pat = pattern_scores(
@@ -391,7 +400,7 @@ def prepare_frame(cfg: dict[str, Any], db_path: Path | None = None, offline: boo
     merged["pattern_score"] = pat.values
     merged["pattern_score"] = merged["pattern_score"].fillna(0.0)
 
-    # Funding rate (8h) を 15m バーへ asof 結合。取得失敗時は無効化（0.0）で継続。
+    # Funding rate (8h) を基準足（m15_*）へ asof 結合。取得失敗時は無効化（0.0）で継続。
     funding_start = max(0, int(merged["m15_open_time"].iloc[0]) - INTERVAL_MS["1d"])
     funding_end = int(merged["m15_close_time"].iloc[-1]) + 1
     try:

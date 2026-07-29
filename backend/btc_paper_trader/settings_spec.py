@@ -24,7 +24,7 @@ EDITABLE_PARAMS: list[dict[str, Any]] = [
     {"path": "risk.sl_atr_mult", "label": "損切り幅 (ATR倍)", "type": "float",
      "min": 0.1, "max": 10.0, "step": 0.1, "auto": True, "help": ""},
     {"path": "risk.max_hold_bars", "label": "最大保有バー数", "type": "int",
-     "min": 1, "max": 500, "step": 1, "auto": True, "help": "15分足の本数"},
+     "min": 1, "max": 500, "step": 1, "auto": True, "help": "運用中の時間足の本数"},
     {"path": "risk.position_fraction", "label": "投入資金割合", "type": "float",
      "min": 0.01, "max": 1.0, "step": 0.01, "auto": False, "help": "自動調整の対象外（手動のみ）"},
     {"path": "risk.max_daily_loss_pct", "label": "日次最大損失率", "type": "float",

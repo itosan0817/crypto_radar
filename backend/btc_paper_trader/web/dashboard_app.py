@@ -13,6 +13,7 @@ import yaml
 from flask import Flask, Response, jsonify, request
 
 from ..config import load_config, package_root
+from ..data.binance_futures import bars_per_hour
 from ..eval.trade_log import build_trades as _build_trades
 from ..eval.trade_log import period_stats as _advice_stats
 from ..eval.trade_log import tail_jsonl as _tail_jsonl
@@ -229,8 +230,8 @@ _DASH_HTML = """<!DOCTYPE html>
     </div>
     <div class="range-btns" id="iv-btns">
       <button data-iv="1m">1分</button>
-      <button data-iv="15m" class="active">15分</button>
-      <button data-iv="1h">1時間</button>
+      <button data-iv="15m">15分</button>
+      <button data-iv="1h" class="active">1時間</button>
       <button data-iv="4h">4時間</button>
       <button data-iv="1d">日足</button>
       <button data-iv="1w">週足</button>
@@ -371,9 +372,9 @@ _DASH_HTML = """<!DOCTYPE html>
 
     const IV_MS = { "1m": 60000, "15m": 900000, "1h": 3600000, "4h": 14400000, "1d": 86400000, "1w": 604800000 };
     const IV_LABEL = { "1m": "1分足", "15m": "15分足", "1h": "1時間足", "4h": "4時間足", "1d": "日足", "1w": "週足" };
-    let ivSel = localStorage.getItem("dash_iv") || "15m";
-    if (!IV_MS[ivSel]) ivSel = "15m";
-    let lastIv = "15m";
+    let ivSel = localStorage.getItem("dash_iv") || "1h";
+    if (!IV_MS[ivSel]) ivSel = "1h";
+    let lastIv = "1h";
     let ind = null;
     try { ind = JSON.parse(localStorage.getItem("dash_ind")); } catch (e) { ind = null; }
     ind = ind || {};
@@ -1693,8 +1694,8 @@ def create_app(config_path: Path | None = None) -> Flask:
             hours = 24
         hours = max(1, min(24 * 30, hours))
         since = _utc_ms() - hours * 3600 * 1000
-        # 15分足=毎時4本 + 余裕。決済だけが期間内に入る取引も拾えるよう広めに読む
-        max_lines = min(16000, hours * 4 + 800)
+        # 決済だけが期間内に入る取引も拾えるよう広めに読む
+        max_lines = min(16000, int(hours * bars_per_hour(interval)) + 800)
         records = _tail_jsonl(log_path, max_lines=max_lines)
         trades, open_tr = _build_trades(records)
         visible = [
@@ -1843,7 +1844,8 @@ def create_app(config_path: Path | None = None) -> Flask:
                 fresh = load_config(config_path)
                 days = 7
                 since = _utc_ms() - days * 24 * 3600 * 1000
-                records = _tail_jsonl(log_path, max_lines=min(16000, days * 24 * 4 + 800))
+                bph = bars_per_hour(str(fresh["intervals"]["signal"]))
+                records = _tail_jsonl(log_path, max_lines=min(16000, int(days * 24 * bph) + 800))
                 stats = _advice_stats(records, since, days)
                 result = advise_params(fresh, _current_params(fresh), stats)
                 with advice_lock:
@@ -1894,7 +1896,8 @@ def create_app(config_path: Path | None = None) -> Flask:
                 from ..backtest.whatif import run_what_if
 
                 fresh = load_config(config_path)
-                res = run_what_if(fresh, overrides, eval_bars=hours * 4)
+                bph = bars_per_hour(str(fresh["intervals"]["signal"]))
+                res = run_what_if(fresh, overrides, eval_bars=int(hours * bph))
                 trades, open_tr = _build_trades(res["records"])
                 if open_tr is not None:
                     trades.append({**open_tr, "exit_time": None, "exit_px": None, "pnl": None,
