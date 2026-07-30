@@ -39,7 +39,7 @@ _DASH_HTML = """<!DOCTYPE html>
       --panel: #1a2332;
       --text: #e7ecf3;
       --muted: #ffffff;
-      --accent: #3d8fd1;
+      --accent: #6cb6e8;
       --whatif: #bd8733;
       --pos: #3ecf8e;
       --neg: #e06c75;
@@ -72,6 +72,8 @@ _DASH_HTML = """<!DOCTYPE html>
       font-weight: 600;
     }
     .toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
     .toolbar a { color: var(--accent); text-decoration: none; font-size: 0.875rem; }
     .toolbar a:hover { text-decoration: underline; }
     #status { font-size: 0.8rem; color: var(--muted); }
@@ -86,11 +88,11 @@ _DASH_HTML = """<!DOCTYPE html>
       cursor: pointer;
     }
     .range-btns button.active {
-      background: rgba(61, 143, 209, 0.18);
+      background: rgba(108, 182, 232, 0.18);
       border-color: var(--accent);
       color: var(--text);
     }
-    .btn.primary { background: rgba(61, 143, 209, 0.18); border-color: var(--accent); color: var(--text); }
+    .btn.primary { background: rgba(108, 182, 232, 0.18); border-color: var(--accent); color: var(--text); }
     .btn.warn { background: rgba(189, 135, 51, 0.18); border-color: var(--whatif); color: var(--text); }
     .btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .tiles {
@@ -151,10 +153,10 @@ _DASH_HTML = """<!DOCTYPE html>
     .pill.short { background: rgba(224, 108, 117, 0.15); color: var(--neg); }
     .pill.flat { background: rgba(139, 152, 168, 0.2); color: var(--muted); }
     .pill.rank-s { background: rgba(62, 207, 142, 0.15); color: var(--pos); }
-    .pill.rank-a { background: rgba(61, 143, 209, 0.18); color: var(--accent); }
+    .pill.rank-a { background: rgba(108, 182, 232, 0.18); color: var(--accent); }
     .pill.rank-b { background: rgba(139, 152, 168, 0.2); color: var(--muted); }
     #aero-body tr { cursor: pointer; }
-    #aero-body tr.active td { background: rgba(61, 143, 209, 0.12); }
+    #aero-body tr.active td { background: rgba(108, 182, 232, 0.12); }
     .pager { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.75rem; font-size: 0.8rem; flex-wrap: wrap; }
     .pager .count { color: var(--muted); margin-left: auto; }
     .mono { font-family: ui-monospace, monospace; font-size: 0.78rem; }
@@ -400,8 +402,11 @@ _DASH_HTML = """<!DOCTYPE html>
         <button data-iv="1d">日足</button>
         <button data-iv="1w">週足</button>
       </div>
-      <div class="chart-wrap">
+      <div class="chart-wrap" style="position:relative;">
         <div id="aero-chart" style="width:100%;height:320px;"></div>
+        <div id="aero-chart-empty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--muted);font-size:0.85rem;text-align:center;padding:0 1rem;">
+          この足種・期間にはキャッシュされたデータがありません。他の足種を試すか、直近の表示に戻してください。
+        </div>
       </div>
       <div class="form-actions">
         <button class="btn" id="aero-chart-reset">直近の表示に戻す</button>
@@ -1379,6 +1384,7 @@ _DASH_HTML = """<!DOCTYPE html>
       const candles = klines.map(function (k) {
         return { time: toChartTime(k.t), open: k.o, high: k.h, low: k.l, close: k.c };
       });
+      document.getElementById("aero-chart-empty").style.display = candles.length ? "none" : "flex";
       aeroCandleSeries.setData(candles);
       if (centerMs != null && candles.length) {
         const targetTime = toChartTime(centerMs);
@@ -1528,7 +1534,7 @@ _TRADES_HTML = """<!DOCTYPE html>
       --panel: #1a2332;
       --text: #e7ecf3;
       --muted: #8b98a8;
-      --accent: #3d8fd1;
+      --accent: #6cb6e8;
       --pos: #3ecf8e;
       --neg: #e06c75;
       --border: #2a3545;
@@ -1544,6 +1550,8 @@ _TRADES_HTML = """<!DOCTYPE html>
     }
     h1 { font-size: 1.15rem; font-weight: 600; margin: 0 0 0.25rem; }
     .sub { color: var(--muted); font-size: 0.82rem; margin-bottom: 1rem; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
     .sub a { color: var(--accent); text-decoration: none; }
     .sub a:hover { text-decoration: underline; }
     section {
@@ -1568,7 +1576,7 @@ _TRADES_HTML = """<!DOCTYPE html>
     }
     select, input[type="date"] { color: var(--text); cursor: default; background: var(--bg); }
     button.active {
-      background: rgba(61, 143, 209, 0.18);
+      background: rgba(108, 182, 232, 0.18);
       border-color: var(--accent);
       color: var(--text);
     }
