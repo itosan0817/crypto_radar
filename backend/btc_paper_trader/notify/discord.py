@@ -9,18 +9,24 @@ from ..config import env_webhook_daily, env_webhook_hourly
 
 
 def _post_webhook(url: str, payload: dict[str, Any], retries: int = 4) -> None:
+    """失敗時は理由(ステータスコード/レスポンス本文/例外)を必ず1行ログに残す。
+    以前は成功するまで無言でリトライし、諦める時も何も出力していなかったため、
+    通知が届かない原因（Discord側の4xx/5xx等）を後から一切追跡できなかった。"""
     if not url:
         return
+    last_reason = "unknown"
     backoff = 1.0
     for attempt in range(retries):
         try:
             r = requests.post(url, json=payload, timeout=30)
             if r.status_code in (200, 204):
                 return
-        except requests.RequestException:
-            pass
+            last_reason = f"HTTP {r.status_code}: {r.text[:300]}"
+        except requests.RequestException as e:
+            last_reason = f"{type(e).__name__}: {str(e)[:300]}"
         time.sleep(backoff)
         backoff = min(backoff * 2.0, 30.0)
+    print(f"[discord] webhook post failed after {retries} attempts: {last_reason}")
 
 
 def _normalize_fields(fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
