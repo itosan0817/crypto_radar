@@ -392,11 +392,19 @@ _DASH_HTML = """<!DOCTYPE html>
     <section>
       <h2 id="aero-chart-title">BTC 参考チャート（直近7日）</h2>
       <p class="chart-note">対象トークン自体の価格取得は未実装のため、代わりに市場全体（BTC）の値動きを参考表示します。下の一覧から行をクリックすると、その検知時刻を挟んだ前後の値動きに切り替わります（🔻が検知時刻）。</p>
+      <div class="range-btns" id="aero-iv-btns">
+        <button data-iv="1m">1分足</button>
+        <button data-iv="15m">15分足</button>
+        <button data-iv="1h" class="active">1時間足</button>
+        <button data-iv="4h">4時間足</button>
+        <button data-iv="1d">日足</button>
+        <button data-iv="1w">週足</button>
+      </div>
       <div class="chart-wrap">
         <div id="aero-chart" style="width:100%;height:320px;"></div>
       </div>
       <div class="form-actions">
-        <button class="btn" id="aero-chart-reset">直近7日の表示に戻す</button>
+        <button class="btn" id="aero-chart-reset">直近の表示に戻す</button>
       </div>
     </section>
 
@@ -1272,6 +1280,9 @@ _DASH_HTML = """<!DOCTYPE html>
     document.querySelectorAll("#iv-btns button").forEach(function (x) {
       x.classList.toggle("active", x.dataset.iv === ivSel);
     });
+    document.querySelectorAll("#aero-iv-btns button").forEach(function (x) {
+      x.classList.toggle("active", x.dataset.iv === aeroIv);
+    });
     document.querySelectorAll("#ind-row input[data-ind]").forEach(function (cb) {
       cb.checked = !!ind[cb.dataset.ind];
     });
@@ -1340,6 +1351,18 @@ _DASH_HTML = """<!DOCTYPE html>
 
     // ---- Aerodrome用チャート（BTC参考表示） ----
     let aeroChart = null, aeroCandleSeries = null;
+    let aeroIv = localStorage.getItem("dash_aero_iv") || "1h";
+    if (!IV_MS[aeroIv]) aeroIv = "1h";
+    let aeroCurrentEventT0 = null; // null = 直近表示、値あり = その検知時刻を中心に表示中
+    const AERO_DEFAULT_HOURS = { "1m": 24, "15m": 72, "1h": 168, "4h": 720, "1d": 4320, "1w": 17520 };
+    const AERO_EVENT_WINDOW = {
+      "1m": { before: 6, after: 24 },
+      "15m": { before: 12, after: 48 },
+      "1h": { before: 24, after: 72 },
+      "4h": { before: 96, after: 288 },
+      "1d": { before: 336, after: 720 },
+      "1w": { before: 1440, after: 4320 },
+    };
 
     function ensureAeroChart() {
       if (aeroChart || !window.LightweightCharts || !chartBase) return;
@@ -1375,21 +1398,30 @@ _DASH_HTML = """<!DOCTYPE html>
 
     async function loadAeroChartDefault() {
       ensureAeroChart();
-      document.getElementById("aero-chart-title").textContent = "BTC 参考チャート（直近7日）";
+      aeroCurrentEventT0 = null;
+      document.getElementById("aero-chart-title").textContent =
+        "BTC 参考チャート（" + IV_LABEL[aeroIv] + "・直近" + AERO_DEFAULT_HOURS[aeroIv] + "時間）";
       document.querySelectorAll("#aero-body tr").forEach(function (r) { r.classList.remove("active"); });
       try {
-        const res = await fetch("/api/klines?interval=1h&hours=168").then(function (r) { return r.json(); });
+        const params = new URLSearchParams({ interval: aeroIv, hours: AERO_DEFAULT_HOURS[aeroIv] });
+        const res = await fetch("/api/klines?" + params.toString()).then(function (r) { return r.json(); });
         renderAeroChart(res.klines || [], null);
       } catch (e) { /* チャート取得失敗はサイレントに無視（一覧は引き続き使える） */ }
     }
 
     async function loadAeroChartForEvent(t0Iso, rowEl) {
       ensureAeroChart();
+      aeroCurrentEventT0 = t0Iso;
       document.querySelectorAll("#aero-body tr").forEach(function (r) { r.classList.remove("active"); });
-      if (rowEl) rowEl.classList.add("active");
-      document.getElementById("aero-chart-title").textContent = "BTC 参考チャート（検知: " + fmtJstDate(t0Iso) + " JST 前後）";
+      const row = rowEl || document.querySelector('#aero-body tr[data-t0="' + t0Iso + '"]');
+      if (row) row.classList.add("active");
+      document.getElementById("aero-chart-title").textContent =
+        "BTC 参考チャート（" + IV_LABEL[aeroIv] + "・検知: " + fmtJstDate(t0Iso) + " JST 前後）";
       try {
-        const params = new URLSearchParams({ center: t0Iso, interval: "1h", before_hours: "24", after_hours: "72" });
+        const w = AERO_EVENT_WINDOW[aeroIv] || AERO_EVENT_WINDOW["1h"];
+        const params = new URLSearchParams({
+          center: t0Iso, interval: aeroIv, before_hours: w.before, after_hours: w.after,
+        });
         const res = await fetch("/api/aerodrome/price-chart?" + params.toString()).then(function (r) { return r.json(); });
         renderAeroChart(res.klines || [], res.center_ms);
       } catch (e) { /* noop */ }
@@ -1401,6 +1433,20 @@ _DASH_HTML = """<!DOCTYPE html>
       loadAeroChartForEvent(row.dataset.t0, row);
     });
     document.getElementById("aero-chart-reset").addEventListener("click", loadAeroChartDefault);
+    document.getElementById("aero-iv-btns").addEventListener("click", function (ev) {
+      const b = ev.target.closest("button");
+      if (!b) return;
+      aeroIv = b.dataset.iv;
+      localStorage.setItem("dash_aero_iv", aeroIv);
+      document.querySelectorAll("#aero-iv-btns button").forEach(function (x) {
+        x.classList.toggle("active", x.dataset.iv === aeroIv);
+      });
+      if (aeroCurrentEventT0) {
+        loadAeroChartForEvent(aeroCurrentEventT0);
+      } else {
+        loadAeroChartDefault();
+      }
+    });
 
     async function loadAero() {
       const st = document.getElementById("aero-status-text");
@@ -1888,7 +1934,7 @@ def create_app(config_path: Path | None = None) -> Flask:
             hours = int(request.args.get("hours", "24"))
         except ValueError:
             hours = 24
-        hours = max(1, min(24 * 14, hours))
+        hours = max(1, min(24 * 3650, hours))
         now = _utc_ms()
         # 大きい足でもチャートが成立するよう最低60本、1分足の長期間は3000本で頭打ち
         bars_wanted = int(max(60, min(3000, hours * 3600 * 1000 // step + 2)))
@@ -2274,11 +2320,11 @@ def create_app(config_path: Path | None = None) -> Flask:
         if iv not in _ALLOWED_INTERVALS:
             iv = "1h"
         try:
-            before_hours = max(1, min(24 * 14, int(request.args.get("before_hours", "24"))))
+            before_hours = max(1, min(24 * 400, int(request.args.get("before_hours", "24"))))
         except ValueError:
             before_hours = 24
         try:
-            after_hours = max(1, min(24 * 14, int(request.args.get("after_hours", "72"))))
+            after_hours = max(1, min(24 * 400, int(request.args.get("after_hours", "72"))))
         except ValueError:
             after_hours = 72
 
