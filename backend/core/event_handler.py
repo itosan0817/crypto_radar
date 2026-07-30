@@ -53,23 +53,23 @@ async def handle_call_scheduled(w3: AsyncWeb3, log: dict):
     )
 
     # --- 二段構えの解析フロー (Aランク以上で深層分析発動) ---
+    # 通知は S級/A級のみ。B級はFirestoreへの記録（ダッシュボードでの答え合わせ用）のみ行い、
+    # Discordへは通知しない。
     if ai_rank in ["S", "A"]:
         safe_print(f"🔍 {ai_rank}級ランクにつき、深層トレンド分析を開始します...")
-        
+
         # 1. 過去7日間の履歴を取得
         recent_events = FirebaseService.get_recent_scheduled_events(days=7)
-        
+
         # 2. 最新の Pro モデルで深層分析 (日常・トレンド・総合判断)
         deep_result = await AIService.analyze_with_trend(decoded_data, tvl_ratio, recent_events)
         safe_print(f"⚖️ 深層分析完了: {deep_result.get('final_decision')}")
-        
+
         # 3. リッチ版の深層分析アラートを送信
         DiscordService.send_deep_analysis_alert(contract_addr, tx_hash, deep_result)
         safe_print("📱 Discordへ【深層分析】リッチ通知を送信しました")
     else:
-        # 通常の B ランク等は Flash の結果で標準通知
-        DiscordService.send_t0_entry_notification(contract_addr, tx_hash, t0_price, slippage, ai_rank, ai_score, ai_summary)
-        safe_print("📱 Discordへ通常エントリー通知を送信しました")
+        safe_print(f"🔕 {ai_rank}級のため通知はスキップ（Firestoreへの記録のみ）")
 
 
 async def handle_call_executed(w3: AsyncWeb3, log: dict):

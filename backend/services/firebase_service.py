@@ -126,6 +126,36 @@ class FirebaseService:
             return []
 
     @classmethod
+    def query_simulations(cls, limit_fetch: int = 500):
+        """ダッシュボード用: 直近の記録を新しい順で取得する。
+
+        絞り込み・ページングは呼び出し側（ダッシュボードAPI）でPython側で行う。
+        複合インデックスが未整備でも動くよう、単一フィールドの order_by のみを使う
+        （タイムロック変更予約は頻度が低いため、直近500件のクライアント側フィルタで十分）。
+        """
+        db = cls._get_db()
+        try:
+            docs = (
+                db.collection("simulations")
+                .order_by("t0_timestamp", direction="DESCENDING")
+                .limit(limit_fetch)
+                .stream()
+            )
+            results = []
+            for doc in docs:
+                d = doc.to_dict()
+                d["event_id"] = doc.id
+                for k in ("t0_timestamp", "t48_timestamp"):
+                    v = d.get(k)
+                    if v is not None and hasattr(v, "isoformat"):
+                        d[k] = v.isoformat()
+                results.append(d)
+            return results
+        except Exception as e:
+            safe_print(f"❌ [Firestore] ダッシュボード用クエリエラー: {e}")
+            return []
+
+    @classmethod
     def cleanup_old_simulations(cls, days: int = 30):
         try:
             db = cls._get_db()

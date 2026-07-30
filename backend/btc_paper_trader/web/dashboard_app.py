@@ -38,7 +38,7 @@ _DASH_HTML = """<!DOCTYPE html>
       --bg: #0f1419;
       --panel: #1a2332;
       --text: #e7ecf3;
-      --muted: #8b98a8;
+      --muted: #ffffff;
       --accent: #3d8fd1;
       --whatif: #bd8733;
       --pos: #3ecf8e;
@@ -150,6 +150,11 @@ _DASH_HTML = """<!DOCTYPE html>
     .pill.long { background: rgba(62, 207, 142, 0.15); color: var(--pos); }
     .pill.short { background: rgba(224, 108, 117, 0.15); color: var(--neg); }
     .pill.flat { background: rgba(139, 152, 168, 0.2); color: var(--muted); }
+    .pill.rank-s { background: rgba(62, 207, 142, 0.15); color: var(--pos); }
+    .pill.rank-a { background: rgba(61, 143, 209, 0.18); color: var(--accent); }
+    .pill.rank-b { background: rgba(139, 152, 168, 0.2); color: var(--muted); }
+    .pager { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.75rem; font-size: 0.8rem; flex-wrap: wrap; }
+    .pager .count { color: var(--muted); margin-left: auto; }
     .mono { font-family: ui-monospace, monospace; font-size: 0.78rem; }
     dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 0.35rem 1rem; font-size: 0.9rem; }
     dt { color: var(--muted); }
@@ -219,9 +224,15 @@ _DASH_HTML = """<!DOCTYPE html>
   </style>
 </head>
 <body>
-  <h1>BTC Paper Trader</h1>
-  <p class="sub">時刻は日本時間 (JST) · 実績表示は60秒ごとに自動更新</p>
+  <h1 id="page-h1">BTC Paper Trader</h1>
+  <p class="sub" id="page-sub">時刻は日本時間 (JST) · 実績表示は60秒ごとに自動更新</p>
 
+  <div class="range-btns" id="app-toggle">
+    <button data-app="btc" class="active">📈 BTC Paper Trader</button>
+    <button data-app="aero">🛰️ Aerodrome Radar</button>
+  </div>
+
+  <div id="btc-view">
   <div class="toolbar">
     <div class="range-btns" id="range-btns">
       <button data-hours="24" class="active">1日</button>
@@ -361,6 +372,54 @@ _DASH_HTML = """<!DOCTYPE html>
       </table>
     </div>
   </section>
+  </div>
+
+  <div id="aero-view" style="display:none">
+    <div class="toolbar">
+      <div class="range-btns" id="aero-rank-btns">
+        <button data-rank="all" class="active">すべて</button>
+        <button data-rank="S">S級</button>
+        <button data-rank="A">A級</button>
+        <button data-rank="B">B級</button>
+      </div>
+      <div class="range-btns" id="aero-status-btns">
+        <button data-status="all" class="active">すべて</button>
+        <button data-status="executed">答え合わせ済</button>
+        <button data-status="pending">結果待ち</button>
+      </div>
+      <span id="aero-status-text">読み込み中…</span>
+    </div>
+
+    <div class="tiles" id="aero-tiles"></div>
+
+    <section>
+      <h2>タイムロック変更予約 — 検知と答え合わせ</h2>
+      <p class="chart-note">通知（Discord）はS級/A級のみですが、B級も含め検知した全件をここに表示します。「T=0価格」は検知時の仮想エントリー価格、「T+48価格」は48時間後（またはExecuted）の実行時価格、PnLはその変化率です。</p>
+      <div class="scroll-x">
+        <table>
+          <thead>
+            <tr>
+              <th>検知日時 (JST)</th>
+              <th>ランク</th>
+              <th>スコア</th>
+              <th>コントラクト</th>
+              <th>T=0価格</th>
+              <th>T+48価格</th>
+              <th>PnL</th>
+              <th>状態</th>
+            </tr>
+          </thead>
+          <tbody id="aero-body"></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <button id="aero-btn-prev">« 前へ</button>
+        <span id="aero-page-indicator">1 / 1</span>
+        <button id="aero-btn-next">次へ »</button>
+        <span class="count" id="aero-total-count"></span>
+      </div>
+    </section>
+  </div>
 
   <script>
     const POS = "#3ecf8e", NEG = "#e06c75", MUTED = "#8b98a8", ACCENT = "#3d8fd1", WHATIF = "#bd8733";
@@ -1216,6 +1275,139 @@ _DASH_HTML = """<!DOCTYPE html>
     });
     loadSettings();
     setInterval(load, 60000);
+
+    // ---- Aerodrome Radar（タイムロック監視の検知/答え合わせ） ----
+    let aeroState = { rank: "all", status: "all", page: 1, pageSize: 20 };
+    let aeroLoaded = false;
+
+    function fmtJstDate(iso) {
+      if (!iso) return "—";
+      try {
+        const d = new Date(iso);
+        return new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 16).replace("T", " ");
+      } catch (e) { return "—"; }
+    }
+    function rankPill(rank) {
+      const cls = rank === "S" ? "rank-s" : rank === "A" ? "rank-a" : "rank-b";
+      return '<span class="pill ' + cls + '">' + (rank || "?") + "級</span>";
+    }
+    function aeroPnlHtml(v) {
+      if (v == null) return "—";
+      const cls = v >= 0 ? "pos" : "neg";
+      return '<span class="' + cls + '">' + (v >= 0 ? "+" : "") + Number(v).toFixed(2) + "%</span>";
+    }
+
+    function renderAeroTiles(summary) {
+      const tiles = ["S", "A", "total"].map(function (k) {
+        const s = summary[k] || { count: 0, wins: 0, total_pnl: 0 };
+        const label = k === "total" ? "全体" : k + "級";
+        const winRate = s.count ? (s.wins / s.count * 100).toFixed(0) + "%" : "—";
+        return '<div class="tile"><div class="k">' + label + "（答え合わせ済のみ集計）</div>" +
+          '<div class="v">' + s.count + "件</div>" +
+          '<div class="s">勝率 ' + winRate + " / 合計PnL " +
+          (s.total_pnl >= 0 ? "+" : "") + s.total_pnl.toFixed(2) + "%</div></div>";
+      }).join("");
+      document.getElementById("aero-tiles").innerHTML = tiles;
+    }
+
+    function renderAeroTable(events) {
+      const tbody = document.getElementById("aero-body");
+      if (!events.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted)">該当する記録はありません</td></tr>';
+        return;
+      }
+      tbody.innerHTML = events.map(function (e) {
+        const statusLabel = e.status === "executed"
+          ? '<span class="pill flat">答え合わせ済</span>'
+          : '<span class="pill flat">結果待ち</span>';
+        const addr = e.contract_address || "";
+        const short = addr ? (addr.slice(0, 6) + "…" + addr.slice(-4)) : "—";
+        const link = e.event_id
+          ? '<a href="https://basescan.org/tx/' + e.event_id + '" target="_blank" rel="noopener" class="mono">' + short + "</a>"
+          : short;
+        return "<tr>" +
+          '<td class="mono">' + fmtJstDate(e.t0_timestamp) + "</td>" +
+          "<td>" + rankPill(e.ai_rank) + "</td>" +
+          "<td>" + (e.ai_score != null ? e.ai_score : "—") + "</td>" +
+          "<td>" + link + "</td>" +
+          "<td>" + (e.t0_price != null ? "$" + Number(e.t0_price).toFixed(5) : "—") + "</td>" +
+          "<td>" + (e.t48_price != null ? "$" + Number(e.t48_price).toFixed(5) : "—") + "</td>" +
+          "<td>" + aeroPnlHtml(e.simulated_pnl) + "</td>" +
+          "<td>" + statusLabel + "</td>" +
+          "</tr>";
+      }).join("");
+    }
+
+    async function loadAero() {
+      const st = document.getElementById("aero-status-text");
+      st.textContent = "読み込み中…";
+      const params = new URLSearchParams({
+        rank: aeroState.rank, status: aeroState.status,
+        page: aeroState.page, page_size: aeroState.pageSize,
+      });
+      try {
+        const res = await fetch("/api/aerodrome/events?" + params.toString()).then(function (r) { return r.json(); });
+        if (res.error) { st.textContent = "✗ " + res.error; return; }
+        renderAeroTiles(res.summary || {});
+        renderAeroTable(res.events || []);
+        aeroState.page = res.page;
+        const totalPages = Math.max(1, res.total_pages || 1);
+        document.getElementById("aero-page-indicator").textContent = res.page + " / " + totalPages;
+        document.getElementById("aero-total-count").textContent = "全 " + res.total + " 件";
+        document.getElementById("aero-btn-prev").disabled = res.page <= 1;
+        document.getElementById("aero-btn-next").disabled = res.page >= totalPages;
+        st.textContent = "最終更新: " + new Date().toLocaleTimeString("ja-JP") + " JST";
+      } catch (e) {
+        st.textContent = "読み込み失敗: " + e;
+      }
+    }
+
+    document.getElementById("aero-rank-btns").addEventListener("click", function (ev) {
+      const b = ev.target.closest("button");
+      if (!b) return;
+      aeroState.rank = b.dataset.rank;
+      aeroState.page = 1;
+      document.querySelectorAll("#aero-rank-btns button").forEach(function (x) { x.classList.toggle("active", x === b); });
+      loadAero();
+    });
+    document.getElementById("aero-status-btns").addEventListener("click", function (ev) {
+      const b = ev.target.closest("button");
+      if (!b) return;
+      aeroState.status = b.dataset.status;
+      aeroState.page = 1;
+      document.querySelectorAll("#aero-status-btns button").forEach(function (x) { x.classList.toggle("active", x === b); });
+      loadAero();
+    });
+    document.getElementById("aero-btn-prev").addEventListener("click", function () {
+      if (aeroState.page > 1) { aeroState.page -= 1; loadAero(); }
+    });
+    document.getElementById("aero-btn-next").addEventListener("click", function () {
+      aeroState.page += 1;
+      loadAero();
+    });
+
+    function switchApp(app) {
+      localStorage.setItem("dash_app", app);
+      document.querySelectorAll("#app-toggle button").forEach(function (x) {
+        x.classList.toggle("active", x.dataset.app === app);
+      });
+      document.getElementById("btc-view").style.display = app === "btc" ? "" : "none";
+      document.getElementById("aero-view").style.display = app === "aero" ? "" : "none";
+      document.getElementById("page-h1").textContent = app === "btc" ? "BTC Paper Trader" : "Aerodrome Radar";
+      document.getElementById("page-sub").textContent = app === "btc"
+        ? "時刻は日本時間 (JST) · 実績表示は60秒ごとに自動更新"
+        : "時刻は日本時間 (JST) · タイムロック変更予約の検知と答え合わせ（Discord通知はS級/A級のみ）";
+      if (app === "aero" && !aeroLoaded) {
+        aeroLoaded = true;
+        loadAero();
+      }
+    }
+    document.getElementById("app-toggle").addEventListener("click", function (ev) {
+      const b = ev.target.closest("button");
+      if (b) switchApp(b.dataset.app);
+    });
+    const savedApp = localStorage.getItem("dash_app");
+    if (savedApp === "aero") switchApp("aero");
   </script>
 </body>
 </html>
@@ -1950,6 +2142,72 @@ def create_app(config_path: Path | None = None) -> Flask:
         hist_path = root / "data" / "auto_tune_history.jsonl"
         rows = _tail_jsonl(hist_path, max_lines=limit)
         return jsonify({"count": len(rows), "history": list(reversed(rows))})
+
+    @app.get("/api/aerodrome/events")
+    def api_aerodrome_events() -> Response:
+        """aerodrome_radar のタイムロック検知・答え合わせ記録（Firestore）を返す。
+        通知はS級/A級のみだが、B級も含め検知した全件をここでは確認できる。"""
+        try:
+            from services.firebase_service import FirebaseService
+        except Exception as e:
+            return jsonify({"error": f"Firebase未設定: {str(e)[:200]}"})
+
+        rank_f = str(request.args.get("rank", "all"))
+        status_f = str(request.args.get("status", "all"))
+        try:
+            page = max(1, int(request.args.get("page", "1")))
+        except ValueError:
+            page = 1
+        try:
+            page_size = int(request.args.get("page_size", "20"))
+        except ValueError:
+            page_size = 20
+        page_size = max(1, min(100, page_size))
+
+        all_events = FirebaseService.query_simulations(limit_fetch=500)
+        for e in all_events:
+            e.pop("raw_calldata", None)  # ダッシュボードでは未使用・ペイロードが大きいため除外
+
+        # サマリーは絞り込み前・答え合わせ済のみで集計（S級/A級タイルが絞り込みで消えないように）
+        summary: dict[str, dict[str, Any]] = {
+            "S": {"count": 0, "wins": 0, "total_pnl": 0.0},
+            "A": {"count": 0, "wins": 0, "total_pnl": 0.0},
+            "total": {"count": 0, "wins": 0, "total_pnl": 0.0},
+        }
+        for e in all_events:
+            if e.get("status") != "executed":
+                continue
+            pnl = float(e.get("simulated_pnl") or 0.0)
+            summary["total"]["count"] += 1
+            summary["total"]["total_pnl"] += pnl
+            if pnl > 0:
+                summary["total"]["wins"] += 1
+            rank = e.get("ai_rank")
+            if rank in ("S", "A"):
+                summary[rank]["count"] += 1
+                summary[rank]["total_pnl"] += pnl
+                if pnl > 0:
+                    summary[rank]["wins"] += 1
+
+        filtered = all_events
+        if rank_f != "all":
+            filtered = [e for e in filtered if e.get("ai_rank") == rank_f]
+        if status_f != "all":
+            filtered = [e for e in filtered if e.get("status") == status_f]
+
+        total = len(filtered)
+        total_pages = max(1, -(-total // page_size))  # ceil
+        page = min(page, total_pages)
+        start = (page - 1) * page_size
+        page_rows = filtered[start : start + page_size]
+
+        return jsonify(
+            {
+                "events": page_rows, "total": total, "page": page,
+                "page_size": page_size, "total_pages": total_pages,
+                "summary": summary,
+            }
+        )
 
     @app.get("/api/config-summary")
     def api_config_summary() -> Response:

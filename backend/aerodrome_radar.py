@@ -56,33 +56,6 @@ async def subscribe_and_listen(w3: AsyncWeb3):
         elif topic0 == TOPIC_CALL_EXECUTED:
             asyncio.create_task(handle_call_executed(w3, log))
 
-async def _weekly_report_loop(FirebaseService, DiscordService) -> None:
-    """WS購読とは独立して週次レポート条件を監視する。"""
-    last_report_date = None
-    while True:
-        now = datetime.datetime.now(datetime.timezone.utc)
-        if now.weekday() == 3 and now.hour == 0 and last_report_date != now.date():
-            weekly_stats = FirebaseService.get_simulation_stats(days=7)
-            if weekly_stats:
-                DiscordService.send_summary_notification(weekly_stats, is_monthly=False)
-                last_report_date = now.date()
-        await asyncio.sleep(30)
-
-async def _health_check_loop(DiscordService) -> None:
-    """1日2回（JST 09:00 / 21:00）に健康診断通知を送るループ"""
-    last_check_hour = None
-    while True:
-        now = datetime.datetime.now(datetime.timezone.utc)
-        # UTC 00:00 (JST 09:00) と UTC 12:00 (JST 21:00) に通知
-        if now.hour in [0, 12] and last_check_hour != now.hour:
-            try:
-                DiscordService.send_health_check()
-                last_check_hour = now.hour
-                safe_print(f"✅ 定例健康診断通知を送信しました (Radar - {now.hour} UTC)")
-            except Exception as e:
-                safe_print(f"⚠️ 定例健康診断通知の送信に失敗: {e}")
-        await asyncio.sleep(60)
-
 async def main_loop():
     """
     インフラ防衛のための無限再接続ループを内包したメインプロセス
@@ -104,9 +77,6 @@ async def main_loop():
     else:
         # データがない、または0件の場合は「起動通知」を優先して送る
         DiscordService.send_startup_notification()
-    
-    asyncio.create_task(_weekly_report_loop(FirebaseService, DiscordService))
-    asyncio.create_task(_health_check_loop(DiscordService))
 
     while True:
         try:

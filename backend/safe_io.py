@@ -1,5 +1,6 @@
 """
 Windows のサービス／パイプリダイレクト環境で、print(flush=True) が OSError(22) になることがある。
+また Windows コンソールの既定コードページ(cp932等)では絵文字が UnicodeEncodeError になることもある。
 その場合でもプロセスを落とさないための安全なコンソール出力。
 """
 from __future__ import annotations
@@ -16,7 +17,7 @@ def safe_print(msg: str, *, flush: bool = True) -> None:
             if flush:
                 stream.flush()
             return
-        except OSError:
+        except (OSError, UnicodeError):
             continue
     try:
         buf = getattr(sys.stderr, "buffer", None) or getattr(sys.stdout, "buffer", None)
