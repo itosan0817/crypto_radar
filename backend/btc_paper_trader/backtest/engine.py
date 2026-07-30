@@ -356,11 +356,13 @@ def prepare_frame(cfg: dict[str, Any], db_path: Path | None = None, offline: boo
         df_disk = load_from_sqlite(cache, sym, iv)
         now_ms = int(pd.Timestamp.utcnow().timestamp() * 1000)
         step_ms = INTERVAL_MS[iv]
-        if df_disk.empty:
-            # 初回は広めに取得
+        if df_disk.empty or len(df_disk) < target_nb:
+            # 初回、または既存キャッシュが目標本数に届いていない場合は広めに取得
+            # （目標本数を後から引き上げた場合の追いつきバックフィルもここで行う。
+            # 重複分は下の drop_duplicates で吸収される）
             start_ms = now_ms - target_nb * step_ms
         else:
-            # 通常時は増分更新（直近1本重ねて取得）
+            # 目標本数を満たしている場合は増分更新（直近1本重ねて取得）
             latest_open = int(df_disk["open_time"].iloc[-1])
             start_ms = max(0, latest_open - step_ms)
 
