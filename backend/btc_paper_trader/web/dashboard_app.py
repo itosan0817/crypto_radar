@@ -452,6 +452,8 @@ _DASH_HTML = """<!DOCTYPE html>
     const IV_LABEL = { "1m": "1分足", "15m": "15分足", "1h": "1時間足", "4h": "4時間足", "1d": "日足", "1w": "週足" };
     let ivSel = localStorage.getItem("dash_iv") || "1h";
     if (!IV_MS[ivSel]) ivSel = "1h";
+    let aeroIv = localStorage.getItem("dash_aero_iv") || "1h";
+    if (!IV_MS[aeroIv]) aeroIv = "1h";
     let lastIv = "1h";
     let ind = null;
     try { ind = JSON.parse(localStorage.getItem("dash_ind")); } catch (e) { ind = null; }
@@ -1351,8 +1353,6 @@ _DASH_HTML = """<!DOCTYPE html>
 
     // ---- Aerodrome用チャート（BTC参考表示） ----
     let aeroChart = null, aeroCandleSeries = null;
-    let aeroIv = localStorage.getItem("dash_aero_iv") || "1h";
-    if (!IV_MS[aeroIv]) aeroIv = "1h";
     let aeroCurrentEventT0 = null; // null = 直近表示、値あり = その検知時刻を中心に表示中
     const AERO_DEFAULT_HOURS = { "1m": 24, "15m": 72, "1h": 168, "4h": 720, "1d": 4320, "1w": 17520 };
     const AERO_EVENT_WINDOW = {
