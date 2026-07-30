@@ -382,19 +382,14 @@ _DASH_HTML = """<!DOCTYPE html>
         <button data-rank="A">A級</button>
         <button data-rank="B">B級</button>
       </div>
-      <div class="range-btns" id="aero-status-btns">
-        <button data-status="all" class="active">すべて</button>
-        <button data-status="executed">答え合わせ済</button>
-        <button data-status="pending">結果待ち</button>
-      </div>
       <span id="aero-status-text">読み込み中…</span>
     </div>
 
     <div class="tiles" id="aero-tiles"></div>
 
     <section>
-      <h2>タイムロック変更予約 — 検知と答え合わせ</h2>
-      <p class="chart-note">通知（Discord）はS級/A級のみですが、B級も含め検知した全件をここに表示します。「T=0価格」は検知時の仮想エントリー価格、「T+48価格」は48時間後（またはExecuted）の実行時価格、PnLはその変化率です。</p>
+      <h2>タイムロック変更予約 — 検知一覧</h2>
+      <p class="chart-note">通知（Discord）はS級/A級のみですが、B級も含め検知した全件をここに表示します。「検知の結論」はS級/A級のみ算出される深層分析の最終判断です。</p>
       <div class="scroll-x">
         <table>
           <thead>
@@ -403,10 +398,8 @@ _DASH_HTML = """<!DOCTYPE html>
               <th>ランク</th>
               <th>スコア</th>
               <th>コントラクト</th>
-              <th>T=0価格</th>
-              <th>T+48価格</th>
-              <th>PnL</th>
-              <th>状態</th>
+              <th>検知の結論</th>
+              <th>AI要約</th>
             </tr>
           </thead>
           <tbody id="aero-body"></tbody>
@@ -1276,8 +1269,8 @@ _DASH_HTML = """<!DOCTYPE html>
     loadSettings();
     setInterval(load, 60000);
 
-    // ---- Aerodrome Radar（タイムロック監視の検知/答え合わせ） ----
-    let aeroState = { rank: "all", status: "all", page: 1, pageSize: 20 };
+    // ---- Aerodrome Radar（タイムロック監視の検知一覧） ----
+    let aeroState = { rank: "all", page: 1, pageSize: 20 };
     let aeroLoaded = false;
 
     function fmtJstDate(iso) {
@@ -1291,21 +1284,20 @@ _DASH_HTML = """<!DOCTYPE html>
       const cls = rank === "S" ? "rank-s" : rank === "A" ? "rank-a" : "rank-b";
       return '<span class="pill ' + cls + '">' + (rank || "?") + "級</span>";
     }
-    function aeroPnlHtml(v) {
-      if (v == null) return "—";
-      const cls = v >= 0 ? "pos" : "neg";
-      return '<span class="' + cls + '">' + (v >= 0 ? "+" : "") + Number(v).toFixed(2) + "%</span>";
+    const DECISION_JA = {
+      BUY: '<span class="pos">💎 買い判断</span>',
+      SELL: '<span class="neg">⚠️ 売り逃げ</span>',
+      DANGER: '<span class="neg">🚨 即撤退</span>',
+      WAIT: '<span class="mono" style="color:var(--muted)">⏳ 静観</span>',
+    };
+    function decisionHtml(d) {
+      return DECISION_JA[d] || "—";
     }
 
     function renderAeroTiles(summary) {
-      const tiles = ["S", "A", "total"].map(function (k) {
-        const s = summary[k] || { count: 0, wins: 0, total_pnl: 0 };
-        const label = k === "total" ? "全体" : k + "級";
-        const winRate = s.count ? (s.wins / s.count * 100).toFixed(0) + "%" : "—";
-        return '<div class="tile"><div class="k">' + label + "（答え合わせ済のみ集計）</div>" +
-          '<div class="v">' + s.count + "件</div>" +
-          '<div class="s">勝率 ' + winRate + " / 合計PnL " +
-          (s.total_pnl >= 0 ? "+" : "") + s.total_pnl.toFixed(2) + "%</div></div>";
+      const tiles = ["total", "S", "A", "B"].map(function (k) {
+        const label = k === "total" ? "検知件数（全体）" : k + "級";
+        return '<div class="tile"><div class="k">' + label + '</div><div class="v">' + (summary[k] || 0) + "件</div></div>";
       }).join("");
       document.getElementById("aero-tiles").innerHTML = tiles;
     }
@@ -1313,13 +1305,10 @@ _DASH_HTML = """<!DOCTYPE html>
     function renderAeroTable(events) {
       const tbody = document.getElementById("aero-body");
       if (!events.length) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted)">該当する記録はありません</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted)">該当する記録はありません</td></tr>';
         return;
       }
       tbody.innerHTML = events.map(function (e) {
-        const statusLabel = e.status === "executed"
-          ? '<span class="pill flat">答え合わせ済</span>'
-          : '<span class="pill flat">結果待ち</span>';
         const addr = e.contract_address || "";
         const short = addr ? (addr.slice(0, 6) + "…" + addr.slice(-4)) : "—";
         const link = e.event_id
@@ -1330,10 +1319,8 @@ _DASH_HTML = """<!DOCTYPE html>
           "<td>" + rankPill(e.ai_rank) + "</td>" +
           "<td>" + (e.ai_score != null ? e.ai_score : "—") + "</td>" +
           "<td>" + link + "</td>" +
-          "<td>" + (e.t0_price != null ? "$" + Number(e.t0_price).toFixed(5) : "—") + "</td>" +
-          "<td>" + (e.t48_price != null ? "$" + Number(e.t48_price).toFixed(5) : "—") + "</td>" +
-          "<td>" + aeroPnlHtml(e.simulated_pnl) + "</td>" +
-          "<td>" + statusLabel + "</td>" +
+          "<td>" + decisionHtml(e.final_decision) + "</td>" +
+          '<td style="text-align:left;max-width:360px;white-space:normal;font-size:0.75rem;color:var(--muted)">' + (e.ai_summary || "—") + "</td>" +
           "</tr>";
       }).join("");
     }
@@ -1342,7 +1329,7 @@ _DASH_HTML = """<!DOCTYPE html>
       const st = document.getElementById("aero-status-text");
       st.textContent = "読み込み中…";
       const params = new URLSearchParams({
-        rank: aeroState.rank, status: aeroState.status,
+        rank: aeroState.rank,
         page: aeroState.page, page_size: aeroState.pageSize,
       });
       try {
@@ -1370,14 +1357,6 @@ _DASH_HTML = """<!DOCTYPE html>
       document.querySelectorAll("#aero-rank-btns button").forEach(function (x) { x.classList.toggle("active", x === b); });
       loadAero();
     });
-    document.getElementById("aero-status-btns").addEventListener("click", function (ev) {
-      const b = ev.target.closest("button");
-      if (!b) return;
-      aeroState.status = b.dataset.status;
-      aeroState.page = 1;
-      document.querySelectorAll("#aero-status-btns button").forEach(function (x) { x.classList.toggle("active", x === b); });
-      loadAero();
-    });
     document.getElementById("aero-btn-prev").addEventListener("click", function () {
       if (aeroState.page > 1) { aeroState.page -= 1; loadAero(); }
     });
@@ -1396,7 +1375,7 @@ _DASH_HTML = """<!DOCTYPE html>
       document.getElementById("page-h1").textContent = app === "btc" ? "BTC Paper Trader" : "Aerodrome Radar";
       document.getElementById("page-sub").textContent = app === "btc"
         ? "時刻は日本時間 (JST) · 実績表示は60秒ごとに自動更新"
-        : "時刻は日本時間 (JST) · タイムロック変更予約の検知と答え合わせ（Discord通知はS級/A級のみ）";
+        : "時刻は日本時間 (JST) · タイムロック変更予約の検知一覧（Discord通知はS級/A級のみ）";
       if (app === "aero" && !aeroLoaded) {
         aeroLoaded = true;
         loadAero();
@@ -2145,15 +2124,16 @@ def create_app(config_path: Path | None = None) -> Flask:
 
     @app.get("/api/aerodrome/events")
     def api_aerodrome_events() -> Response:
-        """aerodrome_radar のタイムロック検知・答え合わせ記録（Firestore）を返す。
-        通知はS級/A級のみだが、B級も含め検知した全件をここでは確認できる。"""
+        """aerodrome_radar のタイムロック検知記録（Firestore）を返す。
+        通知はS級/A級のみだが、B級も含め検知した全件をここでは確認できる。
+        価格取得(core/pricing.py)は現状プレースホルダーのため、T0/T48価格・PnL・
+        答え合わせ状態は返さない（実装され次第あらためて追加する）。"""
         try:
             from services.firebase_service import FirebaseService
         except Exception as e:
             return jsonify({"error": f"Firebase未設定: {str(e)[:200]}"})
 
         rank_f = str(request.args.get("rank", "all"))
-        status_f = str(request.args.get("status", "all"))
         try:
             page = max(1, int(request.args.get("page", "1")))
         except ValueError:
@@ -2166,34 +2146,20 @@ def create_app(config_path: Path | None = None) -> Flask:
 
         all_events = FirebaseService.query_simulations(limit_fetch=500)
         for e in all_events:
-            e.pop("raw_calldata", None)  # ダッシュボードでは未使用・ペイロードが大きいため除外
+            # raw_calldataは大きく未使用。価格系はプレースホルダー値のため誤解を避けて除外
+            for k in ("raw_calldata", "t0_price", "t48_price", "simulated_pnl", "status", "slippage"):
+                e.pop(k, None)
 
-        # サマリーは絞り込み前・答え合わせ済のみで集計（S級/A級タイルが絞り込みで消えないように）
-        summary: dict[str, dict[str, Any]] = {
-            "S": {"count": 0, "wins": 0, "total_pnl": 0.0},
-            "A": {"count": 0, "wins": 0, "total_pnl": 0.0},
-            "total": {"count": 0, "wins": 0, "total_pnl": 0.0},
-        }
+        # サマリーは絞り込み前の件数（全体/ランク別）
+        summary: dict[str, int] = {"total": len(all_events), "S": 0, "A": 0, "B": 0}
         for e in all_events:
-            if e.get("status") != "executed":
-                continue
-            pnl = float(e.get("simulated_pnl") or 0.0)
-            summary["total"]["count"] += 1
-            summary["total"]["total_pnl"] += pnl
-            if pnl > 0:
-                summary["total"]["wins"] += 1
             rank = e.get("ai_rank")
-            if rank in ("S", "A"):
-                summary[rank]["count"] += 1
-                summary[rank]["total_pnl"] += pnl
-                if pnl > 0:
-                    summary[rank]["wins"] += 1
+            if rank in summary:
+                summary[rank] += 1
 
         filtered = all_events
         if rank_f != "all":
             filtered = [e for e in filtered if e.get("ai_rank") == rank_f]
-        if status_f != "all":
-            filtered = [e for e in filtered if e.get("status") == status_f]
 
         total = len(filtered)
         total_pages = max(1, -(-total // page_size))  # ceil

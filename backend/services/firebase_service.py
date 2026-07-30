@@ -126,6 +126,23 @@ class FirebaseService:
             return []
 
     @classmethod
+    def update_simulation_deep_analysis(cls, tx_hash: str, deep_result: dict):
+        """S級/A級のみ実行される深層分析の結果（結論等）を記録する。
+        これまでDiscord通知にしか使われておらずFirestoreに残っていなかったため、
+        ダッシュボードで「検知の結論」を表示するために追加。"""
+        db = cls._get_db()
+        try:
+            doc_ref = db.collection("simulations").document(tx_hash)
+            doc_ref.update({
+                "final_decision": deep_result.get("final_decision"),
+                "daily_insight": deep_result.get("daily_insight"),
+                "trend_insight": deep_result.get("trend_insight"),
+            })
+            safe_print(f"✨ [Firestore] 深層分析結果を保存: {tx_hash[:10]}")
+        except Exception as e:
+            safe_print(f"❌ [Firestore] 深層分析結果の保存エラー: {e}")
+
+    @classmethod
     def query_simulations(cls, limit_fetch: int = 500):
         """ダッシュボード用: 直近の記録を新しい順で取得する。
 

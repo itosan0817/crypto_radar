@@ -65,6 +65,9 @@ async def handle_call_scheduled(w3: AsyncWeb3, log: dict):
         deep_result = await AIService.analyze_with_trend(decoded_data, tvl_ratio, recent_events)
         safe_print(f"⚖️ 深層分析完了: {deep_result.get('final_decision')}")
 
+        # 2.5 結論をFirestoreへ保存（ダッシュボードの「検知の結論」表示用）
+        FirebaseService.update_simulation_deep_analysis(tx_hash, deep_result)
+
         # 3. リッチ版の深層分析アラートを送信
         DiscordService.send_deep_analysis_alert(contract_addr, tx_hash, deep_result)
         safe_print("📱 Discordへ【深層分析】リッチ通知を送信しました")
