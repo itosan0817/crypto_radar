@@ -153,6 +153,8 @@ _DASH_HTML = """<!DOCTYPE html>
     .pill.rank-s { background: rgba(62, 207, 142, 0.15); color: var(--pos); }
     .pill.rank-a { background: rgba(61, 143, 209, 0.18); color: var(--accent); }
     .pill.rank-b { background: rgba(139, 152, 168, 0.2); color: var(--muted); }
+    #aero-body tr { cursor: pointer; }
+    #aero-body tr.active td { background: rgba(61, 143, 209, 0.12); }
     .pager { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.75rem; font-size: 0.8rem; flex-wrap: wrap; }
     .pager .count { color: var(--muted); margin-left: auto; }
     .mono { font-family: ui-monospace, monospace; font-size: 0.78rem; }
@@ -388,8 +390,19 @@ _DASH_HTML = """<!DOCTYPE html>
     <div class="tiles" id="aero-tiles"></div>
 
     <section>
+      <h2 id="aero-chart-title">BTC 参考チャート（直近7日）</h2>
+      <p class="chart-note">対象トークン自体の価格取得は未実装のため、代わりに市場全体（BTC）の値動きを参考表示します。下の一覧から行をクリックすると、その検知時刻を挟んだ前後の値動きに切り替わります（🔻が検知時刻）。</p>
+      <div class="chart-wrap">
+        <div id="aero-chart" style="width:100%;height:320px;"></div>
+      </div>
+      <div class="form-actions">
+        <button class="btn" id="aero-chart-reset">直近7日の表示に戻す</button>
+      </div>
+    </section>
+
+    <section>
       <h2>タイムロック変更予約 — 検知一覧</h2>
-      <p class="chart-note">通知（Discord）はS級/A級のみですが、B級も含め検知した全件をここに表示します。「検知の結論」はS級/A級のみ算出される深層分析の最終判断です。</p>
+      <p class="chart-note">通知（Discord）はS級/A級のみですが、B級も含め検知した全件をここに表示します。「検知の結論」はS級/A級のみ算出される深層分析の最終判断です。行をクリックすると上のチャートがその時刻に切り替わります。</p>
       <div class="scroll-x">
         <table>
           <thead>
@@ -1314,7 +1327,7 @@ _DASH_HTML = """<!DOCTYPE html>
         const link = e.event_id
           ? '<a href="https://basescan.org/tx/' + e.event_id + '" target="_blank" rel="noopener" class="mono">' + short + "</a>"
           : short;
-        return "<tr>" +
+        return '<tr data-t0="' + (e.t0_timestamp || "") + '">' +
           '<td class="mono">' + fmtJstDate(e.t0_timestamp) + "</td>" +
           "<td>" + rankPill(e.ai_rank) + "</td>" +
           "<td>" + (e.ai_score != null ? e.ai_score : "—") + "</td>" +
@@ -1324,6 +1337,70 @@ _DASH_HTML = """<!DOCTYPE html>
           "</tr>";
       }).join("");
     }
+
+    // ---- Aerodrome用チャート（BTC参考表示） ----
+    let aeroChart = null, aeroCandleSeries = null;
+
+    function ensureAeroChart() {
+      if (aeroChart || !window.LightweightCharts || !chartBase) return;
+      aeroChart = LightweightCharts.createChart(document.getElementById("aero-chart"), chartBase);
+      aeroCandleSeries = aeroChart.addCandlestickSeries({
+        upColor: POS, downColor: NEG,
+        borderUpColor: POS, borderDownColor: NEG,
+        wickUpColor: POS, wickDownColor: NEG,
+      });
+    }
+
+    function renderAeroChart(klines, centerMs) {
+      if (!aeroCandleSeries) return;
+      const candles = klines.map(function (k) {
+        return { time: toChartTime(k.t), open: k.o, high: k.h, low: k.l, close: k.c };
+      });
+      aeroCandleSeries.setData(candles);
+      if (centerMs != null && candles.length) {
+        const targetTime = toChartTime(centerMs);
+        let nearest = candles[0].time, diff = Math.abs(candles[0].time - targetTime);
+        candles.forEach(function (c) {
+          const d = Math.abs(c.time - targetTime);
+          if (d < diff) { diff = d; nearest = c.time; }
+        });
+        aeroCandleSeries.setMarkers([{
+          time: nearest, position: "aboveBar", color: WHATIF, shape: "arrowDown", text: "検知",
+        }]);
+      } else {
+        aeroCandleSeries.setMarkers([]);
+      }
+      aeroChart.timeScale().fitContent();
+    }
+
+    async function loadAeroChartDefault() {
+      ensureAeroChart();
+      document.getElementById("aero-chart-title").textContent = "BTC 参考チャート（直近7日）";
+      document.querySelectorAll("#aero-body tr").forEach(function (r) { r.classList.remove("active"); });
+      try {
+        const res = await fetch("/api/klines?interval=1h&hours=168").then(function (r) { return r.json(); });
+        renderAeroChart(res.klines || [], null);
+      } catch (e) { /* チャート取得失敗はサイレントに無視（一覧は引き続き使える） */ }
+    }
+
+    async function loadAeroChartForEvent(t0Iso, rowEl) {
+      ensureAeroChart();
+      document.querySelectorAll("#aero-body tr").forEach(function (r) { r.classList.remove("active"); });
+      if (rowEl) rowEl.classList.add("active");
+      document.getElementById("aero-chart-title").textContent = "BTC 参考チャート（検知: " + fmtJstDate(t0Iso) + " JST 前後）";
+      try {
+        const params = new URLSearchParams({ center: t0Iso, interval: "1h", before_hours: "24", after_hours: "72" });
+        const res = await fetch("/api/aerodrome/price-chart?" + params.toString()).then(function (r) { return r.json(); });
+        renderAeroChart(res.klines || [], res.center_ms);
+      } catch (e) { /* noop */ }
+    }
+
+    document.getElementById("aero-body").addEventListener("click", function (ev) {
+      const row = ev.target.closest("tr[data-t0]");
+      if (!row || !row.dataset.t0) return;
+      loadAeroChartForEvent(row.dataset.t0, row);
+    });
+    document.getElementById("aero-chart-reset").addEventListener("click", loadAeroChartDefault);
 
     async function loadAero() {
       const st = document.getElementById("aero-status-text");
@@ -1379,6 +1456,7 @@ _DASH_HTML = """<!DOCTYPE html>
       if (app === "aero" && !aeroLoaded) {
         aeroLoaded = true;
         loadAero();
+        loadAeroChartDefault();
       }
     }
     document.getElementById("app-toggle").addEventListener("click", function (ev) {
@@ -2173,6 +2251,62 @@ def create_app(config_path: Path | None = None) -> Flask:
                 "page_size": page_size, "total_pages": total_pages,
                 "summary": summary,
             }
+        )
+
+    @app.get("/api/aerodrome/price-chart")
+    def api_aerodrome_price_chart() -> Response:
+        """検知時刻を挟んだ前後のBTC相場を返す（対象トークン自体の価格ではなく、
+        市場全体の値動きを参考として見るための代替チャート）。
+        既存のKlineキャッシュ(SQLite)から読むだけで、Binanceへのライブ取得は行わない
+        （検知は常に過去の出来事なので、既にキャッシュ済みのはず）。"""
+        center_raw = request.args.get("center")
+        if not center_raw:
+            return jsonify({"error": "center is required", "klines": []})
+        try:
+            center_ms = int(datetime.fromisoformat(center_raw.replace("Z", "+00:00")).timestamp() * 1000)
+        except (ValueError, TypeError):
+            try:
+                center_ms = int(center_raw)
+            except ValueError:
+                return jsonify({"error": "invalid center", "klines": []})
+
+        iv = request.args.get("interval", "1h")
+        if iv not in _ALLOWED_INTERVALS:
+            iv = "1h"
+        try:
+            before_hours = max(1, min(24 * 14, int(request.args.get("before_hours", "24"))))
+        except ValueError:
+            before_hours = 24
+        try:
+            after_hours = max(1, min(24 * 14, int(request.args.get("after_hours", "72"))))
+        except ValueError:
+            after_hours = 72
+
+        since = center_ms - before_hours * 3600 * 1000
+        until = center_ms + after_hours * 3600 * 1000
+
+        rows: list[dict[str, Any]] = []
+        if db_path.exists():
+            try:
+                con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
+                try:
+                    cur = con.execute(
+                        "SELECT open_time, open, high, low, close, volume FROM klines "
+                        "WHERE symbol = ? AND interval = ? AND open_time >= ? AND open_time <= ? "
+                        "ORDER BY open_time",
+                        (symbol, iv, since, until),
+                    )
+                    rows = [
+                        {"t": r[0], "o": r[1], "h": r[2], "l": r[3], "c": r[4], "v": r[5]}
+                        for r in cur.fetchall()
+                    ]
+                finally:
+                    con.close()
+            except sqlite3.Error as e:
+                return jsonify({"error": str(e), "klines": []})
+
+        return jsonify(
+            {"symbol": symbol, "interval": iv, "center_ms": center_ms, "count": len(rows), "klines": rows}
         )
 
     @app.get("/api/config-summary")
