@@ -265,26 +265,45 @@ def _resolve_claude_native_signal(
     """
     no_op = {"direction": 0, "confidence": 0.0, "reason": "not_eligible"}
     if sim.side != 0 or sim.pending != 0:
+        print(f"[claude_native] bar={i} 建玉保有中のためClaudeを呼びません (side={sim.side}, pending={sim.pending})")
         return no_op, None, None
     if sim.halt_new_entries:
+        print(f"[claude_native] bar={i} 日次損失ガードで新規停止中のためClaudeを呼びません")
         return {"direction": 0, "confidence": 0.0, "reason": "risk_guard_block"}, None, "risk_guard_block"
     if i < sim.cooldown_first_allowed_i:
+        print(f"[claude_native] bar={i} 連敗クールダウン中のためClaudeを呼びません (解除bar={sim.cooldown_first_allowed_i})")
         return {"direction": 0, "confidence": 0.0, "reason": "cooldown"}, None, "cooldown"
+    # 「古すぎて今さらエントリーできない足」の判定。基準足の長さに連動させる
+    # （以前は30分固定で、1時間足へ移行した後は実質常に古い扱いになり得た）。
+    step_ms = INTERVAL_MS[str(cfg.get("intervals", {}).get("signal", "1h"))]
+    max_age_ms = max(step_ms, 30 * 60 * 1000)
     try:
         close_time = int(df["m15_close_time"].iloc[i])
-        if _utc_ms() - close_time > 30 * 60 * 1000:
+        age_ms = _utc_ms() - close_time
+        if age_ms > max_age_ms:
+            print(
+                f"[claude_native] bar={i} 足が古いためClaudeを呼びません "
+                f"(経過={age_ms // 60000}分 > 上限={max_age_ms // 60000}分)"
+            )
             return no_op, None, "stale_bar"
-    except (KeyError, ValueError, TypeError):
+    except (KeyError, ValueError, TypeError) as e:
+        print(f"[claude_native] bar={i} 足の時刻取得に失敗したためスキップします: {e}")
         return no_op, None, "stale_bar"
 
+    print(f"[claude_native] bar={i} Claudeへ判断を問い合わせます…")
     raw = get_claude_signal(df, i, sim, cfg)
     if raw is None:
+        print(f"[claude_native] bar={i} Claude呼び出しに失敗しました: {get_last_error()}")
         return no_op, None, "claude_call_failed"
 
     cn_cfg = cfg.get("claude_native") or {}
     threshold = float(cn_cfg.get("min_confidence", 70))
     direction_map = {"long": 1, "short": -1, "flat": 0}
     d = direction_map.get(raw["direction"], 0)
+    print(
+        f"[claude_native] bar={i} Claude判断: {raw['direction']} "
+        f"(自信度={raw['confidence']}% / 閾値={threshold:.0f}%)"
+    )
     if d != 0 and raw["confidence"] >= threshold:
         external = {"direction": d, "confidence": raw["confidence"] / 100.0, "reason": "claude_native"}
         return external, raw, None
@@ -352,6 +371,15 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
     last_cfg_reload = time.monotonic()
     signal_step_ms = INTERVAL_MS[cfg["intervals"]["signal"]]
 
+    # どのモードで動いているかをログの先頭に必ず残す（設定の取り違えを即座に判別するため）
+    _startup_mode = str(cfg.get("entry_mode", "regression"))
+    _cn = cfg.get("claude_native") or {}
+    print(
+        f"[startup] entry_mode={_startup_mode} / 基準足={cfg['intervals']['signal']} / "
+        f"学習必要本数={train_window} / claude_native(min_confidence={_cn.get('min_confidence')}, "
+        f"model={_cn.get('model')}, notify={_cn.get('notify')})"
+    )
+
     while True:
         if reload_sec > 0 and time.monotonic() - last_cfg_reload >= reload_sec:
             cfg = load_config()
@@ -373,6 +401,12 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
             df = _df_only_closed(full_df)
 
             if len(df) < train_window:
+                # ここに落ちると一切エントリー検討が行われないまま静かに待ち続ける。
+                # 原因（キャッシュ不足など）が分かるよう必ずログに残す。
+                print(
+                    f"[wait] 確定足が学習必要本数に足りません: {len(df)} / {train_window} 本 "
+                    f"— このままではエントリー判断が一度も行われません"
+                )
                 time.sleep(poll)
                 if once:
                     break
