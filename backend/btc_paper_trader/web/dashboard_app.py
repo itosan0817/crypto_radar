@@ -245,8 +245,8 @@ _DASH_HTML = """<!DOCTYPE html>
     </div>
     <div class="range-btns" id="iv-btns">
       <button data-iv="1m">1分</button>
-      <button data-iv="15m">15分</button>
-      <button data-iv="1h" class="active">1時間</button>
+      <button data-iv="15m" class="active">15分</button>
+      <button data-iv="1h">1時間</button>
       <button data-iv="4h">4時間</button>
       <button data-iv="1d">日足</button>
       <button data-iv="1w">週足</button>
@@ -455,11 +455,11 @@ _DASH_HTML = """<!DOCTYPE html>
 
     const IV_MS = { "1m": 60000, "15m": 900000, "1h": 3600000, "4h": 14400000, "1d": 86400000, "1w": 604800000 };
     const IV_LABEL = { "1m": "1分足", "15m": "15分足", "1h": "1時間足", "4h": "4時間足", "1d": "日足", "1w": "週足" };
-    let ivSel = localStorage.getItem("dash_iv") || "1h";
-    if (!IV_MS[ivSel]) ivSel = "1h";
+    let ivSel = localStorage.getItem("dash_iv") || "15m";
+    if (!IV_MS[ivSel]) ivSel = "15m";
     let aeroIv = localStorage.getItem("dash_aero_iv") || "1h";
     if (!IV_MS[aeroIv]) aeroIv = "1h";
-    let lastIv = "1h";
+    let lastIv = "15m";
     let ind = null;
     try { ind = JSON.parse(localStorage.getItem("dash_ind")); } catch (e) { ind = null; }
     ind = ind || {};

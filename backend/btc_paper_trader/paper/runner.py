@@ -251,6 +251,23 @@ def _maybe_claude_gate(
         post_claude_advice(advice, blocked=blocked, mode=mode)
 
 
+def _should_notify_claude_native(
+    claude_raw: dict[str, Any], entered: bool, only_actionable: bool
+) -> bool:
+    """claude_native の1バー分の判断をDiscordへ通知すべきか。
+
+    only_actionable=True の場合は「実際にエントリーした」か「Claudeが long/short の
+    方向を出した」場合のみ通知し、flat(様子見)は通知しない。基準足が15分だと判断は
+    1日約96回に達し、その大半が様子見になるため、全件通知は実用に耐えないため。
+    通知しなかった判断も log_path のJSONLには従来どおり全件記録される。
+    """
+    if not only_actionable:
+        return True
+    if entered:
+        return True
+    return str(claude_raw.get("direction", "flat")).lower() in ("long", "short")
+
+
 def _clamp_stale_cooldown(sim: SimState, n: int, cd_bars_cfg: int) -> None:
     """再起動をまたいで保存された cooldown_first_allowed_i を、今回ロードした
     DataFrame の行数から見て設定上あり得る範囲へクランプする（sim を直接書き換える）。
@@ -499,7 +516,9 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
                 sim, events = step_simulation(df, None, cfg, sim, i, None, external_signal=external_signal)
                 if claude_raw is not None:
                     entered = any(e.get("type") == "entry" for e in events)
-                    if cn_cfg.get("notify", True):
+                    if cn_cfg.get("notify", True) and _should_notify_claude_native(
+                        claude_raw, entered, bool(cn_cfg.get("notify_only_actionable", False))
+                    ):
                         post_claude_native_signal(
                             claude_raw,
                             entered=entered,

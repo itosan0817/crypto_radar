@@ -166,9 +166,14 @@ def _is_range_regime(row: pd.Series, cfg: dict[str, Any]) -> bool:
     rc = cfg.get("regime") or {}
     if not bool(rc.get("enabled", False)):
         return False
-    # "m15_slope" は基準足（cfg.intervals.signal）自身の傾き。
-    # 基準足が 1h の場合、旧来の「1h_slope」相当はこちらで代替される。
-    s1h = float(row.get("m15_slope", 0.0) or 0.0)
+    # max_abs_slope_1h は名前のとおり「1時間足の傾き」に対する閾値。
+    # 基準足が15m等で 1h が特徴量として存在する場合はその 1h_slope を使い、
+    # 基準足自体が 1h の場合は 1h_slope 列が存在しないため、基準足自身の傾き
+    # （m15_slope = この場合まさに1時間足の傾き）へフォールバックする。
+    s1h = row.get("1h_slope")
+    if s1h is None or (isinstance(s1h, float) and s1h != s1h):  # None / NaN
+        s1h = row.get("m15_slope", 0.0)
+    s1h = float(s1h or 0.0)
     s4h = float(row.get("4h_slope", 0.0) or 0.0)
     atr_ratio = float(row.get("m15_atr_ratio", 0.0) or 0.0)
     return (

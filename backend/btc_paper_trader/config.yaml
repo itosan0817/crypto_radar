@@ -9,9 +9,10 @@ entry_mode: claude_native
 
 intervals:
   # 基準足。列名プレフィックス "m15_" はこの基準足を指す内部固定名（後方互換のため）
-  signal: 1h
+  signal: 15m
   # 基準足自身は自動でフェッチ対象に含まれるため、ここには上位足だけを書く
   features:
+    - 1h
     - 4h
     - 1d
 
@@ -20,8 +21,9 @@ data:
 
 regression:
   lookback_bars:
-    # m15 は基準足（現在は1h）自身の回帰特徴量
+    # m15 は基準足（現在は15m）自身の回帰特徴量
     m15: 96
+    "1h": 72
     "4h": 60
     "1d": 60
 
@@ -65,9 +67,9 @@ filters:
 risk:
   tp_atr_mult: 1.8
   sl_atr_mult: 1.2
-  # 1h足換算で約1日分。基準足を15m→1hへ変更した際に48(=12h)から再スケール。
+  # 15m足換算で約12時間分（基準足を1h→15mへ戻した際に24から再スケール）。
   # 以後は Claude 自動チューニングが検証しながら調整する
-  max_hold_bars: 24
+  max_hold_bars: 48
   position_fraction: 0.98
   # リスクガードによる新規停止を減らすため一時的に緩和
   max_daily_loss_pct: 0.08
@@ -110,8 +112,8 @@ walk_forward:
 
 paper:
   # 新しい足が閉じたかは壁時計で判定するため、この値は「反応の速さ」だけに影響する
-  # （1時間足に対して60秒程度のポーリングは実用上ほぼ無視できる遅延）
-  poll_seconds: 60
+  # （15分足に対して30〜60秒はどちらでも実用上の差は小さい）
+  poll_seconds: 30
   timezone: Asia/Tokyo
   train_window_bars: 5000
   state_path: data/paper_state.json
@@ -247,8 +249,13 @@ claude_native:
   timeout_seconds: 120
   # 閾値未満の判断も含め毎回記録する（後から異なる閾値での再検証に使う）
   log_path: data/claude_native_signal.jsonl
-  # 毎バー確定ごとにDiscordへ判断内容を通知する（1時間足なら実質1時間に1回）
+  # バー確定ごとのClaude判断をDiscordへ通知する
   notify: true
+  # true なら「エントリーした時」と「Claudeがlong/shortの方向を出した時」だけ通知し、
+  # flat(様子見)の判断は通知しない。15分足だと判断が1日約96回になり、その大半は
+  # 様子見のため通知が実用に耐えなくなることへの対策。
+  # 様子見も含めた全判断は log_path のJSONLとダッシュボードで確認できる。
+  notify_only_actionable: true
   # Claude呼び出しがこの回数連続で失敗したらDiscordへアラート（使用上限到達などに気づくため）。
   # 以後は同じ回数ごと(3,6,9...)に再アラートし、復旧時にも1回通知する
   failure_alert_threshold: 3
