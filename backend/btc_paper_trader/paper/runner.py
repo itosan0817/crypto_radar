@@ -251,6 +251,27 @@ def _maybe_claude_gate(
         post_claude_advice(advice, blocked=blocked, mode=mode)
 
 
+def _clamp_stale_cooldown(sim: SimState, n: int, cd_bars_cfg: int) -> None:
+    """再起動をまたいで保存された cooldown_first_allowed_i を、今回ロードした
+    DataFrame の行数から見て設定上あり得る範囲へクランプする（sim を直接書き換える）。
+
+    cooldown_first_allowed_i は prepare_frame() が返す DataFrame 内の相対位置
+    インデックスであり、実時刻ではない。再起動のたびに DataFrame の行構成
+    （キャッシュのウィンドウ処理・特徴量マージ等）がわずかに変わり得るため、
+    以前の実行で保存された位置が今回のインデックス基準とズレることがある。
+    実際に本番で cooldown_bars=2（本来2時間で解除のはず）が、保存値と現在地の
+    ズレにより70本以上先を指してしまい、数日間エントリー検討が一切行われない
+    不具合が発生した。起動時に一度だけ呼び出して補正する。
+    """
+    max_reasonable_i = (n - 1) + 1 + cd_bars_cfg
+    if sim.cooldown_first_allowed_i > max_reasonable_i:
+        print(
+            f"[claude_native] 保存されていたクールダウン解除位置(bar={sim.cooldown_first_allowed_i})が "
+            f"現在の基準（最大bar={max_reasonable_i}）より大幅に先を指しているため補正します"
+        )
+        sim.cooldown_first_allowed_i = max_reasonable_i
+
+
 def _resolve_claude_native_signal(
     df: pd.DataFrame,
     i: int,
@@ -370,6 +391,7 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
     reload_sec = float(cfg.get("paper", {}).get("reload_runtime_params_seconds", 0) or 0)
     last_cfg_reload = time.monotonic()
     signal_step_ms = INTERVAL_MS[cfg["intervals"]["signal"]]
+    cooldown_checked_on_startup = False
 
     # どのモードで動いているかをログの先頭に必ず残す（設定の取り違えを即座に判別するため）
     _startup_mode = str(cfg.get("entry_mode", "regression"))
@@ -414,6 +436,11 @@ def run_paper_loop(cfg: dict[str, Any] | None = None, once: bool = False) -> Non
 
             n = len(df)
             current_ot = int(df["m15_open_time"].iloc[-1])
+
+            if not cooldown_checked_on_startup:
+                cd_bars_cfg = int((cfg.get("risk") or {}).get("cooldown_bars", 0))
+                _clamp_stale_cooldown(sim, n, cd_bars_cfg)
+                cooldown_checked_on_startup = True
 
             # 新しい足が確定していた場合のみ再学習する（壁時計の見積もりが Binance 側の
             # 反映遅延で先走ることがあるため、実データでも念のため確認する）。
