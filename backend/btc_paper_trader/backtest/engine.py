@@ -525,7 +525,12 @@ def step_simulation(
     )
 
     if side == 0 and pending != 0:
-        ok_entry, entry_reason = _entry_timing_confirm(int(pending), pending_regime, row, cfg)
+        if pending_source == "claude_native":
+            # claude_native はClaude自身の判断をそのまま使う設計のため、
+            # レジーム推定を前提にした1分足タイミング確認（trend想定）は適用しない。
+            ok_entry, entry_reason = True, "entry_timing_skipped_claude_native"
+        else:
+            ok_entry, entry_reason = _entry_timing_confirm(int(pending), pending_regime, row, cfg)
         if not ok_entry:
             pending = 0
             pending_confidence = 0.0
