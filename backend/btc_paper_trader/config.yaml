@@ -307,6 +307,15 @@ auto_tune:
   # 下回っていたら前回値へ自動ロールバック
   rollback_after_days: 2
   rollback_loss_pct: 0.02
+  # 提案役/審査役プロンプトに経済指標カレンダー（news_filter.live_syncと同じソース）を
+  # テキストで渡す。取得失敗時は自動的にこのセクションを省略するだけで実行は継続する。
+  # news_filter.live_sync.enabled が false の場合はここが true でも渡されない。
+  news_context:
+    enabled: true
+    lookback_days: 3
+    lookahead_days: 7
+    impacts: [High]
+    countries: [USD]
 
 logging:
   jsonl_path: data/paper_events.jsonl

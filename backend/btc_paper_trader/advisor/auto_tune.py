@@ -31,6 +31,7 @@ from ..settings_spec import (
     write_local_overrides,
 )
 from .claude_cli import extract_json, run_claude
+from .news_context import build_news_context_block
 
 HISTORY_REL = "data/auto_tune_history.jsonl"
 
@@ -107,7 +108,15 @@ def _clamp_to_delta(
     return out
 
 
-def _propose(cfg: dict[str, Any], stats: dict[str, Any], at_cfg: dict[str, Any]) -> dict[str, Any]:
+def _news_section(news_block: str) -> str:
+    if not news_block:
+        return ""
+    return f"\n【経済指標カレンダー(高インパクトのみ、実際の値動きへの影響は未確定)】\n{news_block}\n"
+
+
+def _propose(
+    cfg: dict[str, Any], stats: dict[str, Any], at_cfg: dict[str, Any], news_block: str = ""
+) -> dict[str, Any]:
     n_cand = int(at_cfg.get("candidates", 4))
     max_pct = float(at_cfg.get("max_change_pct", 25))
     iv_label = interval_label_ja(str(cfg.get("intervals", {}).get("signal", "15m")))
@@ -120,12 +129,15 @@ def _propose(cfg: dict[str, Any], stats: dict[str, Any], at_cfg: dict[str, Any])
 
 【直近の成績】
 {_stats_block(stats)}
-
+{_news_section(news_block)}
 【方針】
 - 手数料を払う短期売買では取引の質(1回あたり期待値)が最優先。損切り比率が高い場合は
   「厳選(閾値・確信度を上げる)」と「損益レンジの見直し(TP/SL比)」の両方向を試す。
 - 大きな方向転換より小さな着実な調整。各候補は1〜3個のパラメータだけ変える。
 - 候補同士は異なる仮説を表すこと(全部同じ方向の微修正にしない)。
+- 経済指標カレンダーに直近〜今後の高インパクト指標があれば考慮してよい(例: 重要指標を
+  控えている場合は entry_threshold / min_confidence を厳選方向にする、max_hold_bars を
+  短くして指標発表を跨ぎにくくする、など)。ただし指標が無ければ無理に絡めなくてよい。
 
 【出力】JSONのみ。コードフェンス不可:
 {{"candidates": [{{"name": "候補の短い名前", "values": {{"combine.entry_threshold": 0.12}},
@@ -139,7 +151,7 @@ values には変更するキーだけを含めてください。
 
 
 def _review(
-    candidates: list[dict[str, Any]], stats: dict[str, Any], at_cfg: dict[str, Any]
+    candidates: list[dict[str, Any]], stats: dict[str, Any], at_cfg: dict[str, Any], news_block: str = ""
 ) -> dict[str, dict[str, str]]:
     """リスク審査役。候補ごとに approve / veto を返す。失敗時は全件 approve 扱い。"""
     cand_txt = "\n".join(
@@ -154,11 +166,14 @@ def _review(
 
 【候補】
 {cand_txt}
-
+{_news_section(news_block)}
 【審査基準】
 - 損切り幅(sl_atr_mult)の大幅拡大、保有時間(max_hold_bars)の大幅延長、
   エントリー条件の大幅緩和(閾値・確信度の同時大幅引き下げ)など、
   一度の負けを大きくする/負け頻度を上げる方向の複合変更は veto。
+- 直近〜今後数日に高インパクト指標が控えている場合、その状況でエントリー条件を
+  緩める方向の候補はより慎重に見る(ボラティリティ急変で損切りが連続しやすいため)。
+  ただし指標が無ければこの観点は無視してよい。
 - 判断がつかない場合は approve(検証はバックテストが行う)。
 
 【出力】JSONのみ:
@@ -282,9 +297,10 @@ def run_auto_tune(
     since = _utc_ms() - days * 86_400_000
     records = tail_jsonl(log_path, max_lines=min(16000, int(days * 24 * bph) + 800))
     stats = period_stats(records, since, days)
+    news_block = build_news_context_block(cfg)
 
     # ② 仮説
-    proposal = _propose(cfg, stats, at_cfg)
+    proposal = _propose(cfg, stats, at_cfg, news_block)
     raw_candidates = [c for c in proposal.get("candidates", []) if isinstance(c, dict)]
     candidates: list[dict[str, Any]] = []
     current = _current_auto_values(cfg)
@@ -307,7 +323,7 @@ def run_auto_tune(
         return {"action": "no_candidates", **rec}
 
     # ③ リスク審査
-    reviews = _review(candidates, stats, at_cfg)
+    reviews = _review(candidates, stats, at_cfg, news_block)
     survivors = []
     for c in candidates:
         r = reviews.get(c["name"], {"verdict": "approve", "reason": ""})
@@ -365,6 +381,7 @@ def run_auto_tune(
         "values": winner["values"] if winner else None,
         "old_values": old_values,
         "eval_days": eval_days,
+        "news_context": news_block[:2000] if news_block else None,
     }
     _append_history(history_path, rec)
 
