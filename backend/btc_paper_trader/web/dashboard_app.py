@@ -13,7 +13,8 @@ import yaml
 from flask import Flask, Response, jsonify, request
 
 from ..config import load_config, package_root
-from ..data.binance_futures import bars_per_hour
+from ..data.binance_futures import INTERVAL_MS, bars_per_hour
+from ..eval.trade_log import advisor_accuracy as _advisor_accuracy
 from ..eval.trade_log import build_trades as _build_trades
 from ..eval.trade_log import period_stats as _advice_stats
 from ..eval.trade_log import tail_jsonl as _tail_jsonl
@@ -373,6 +374,27 @@ _DASH_HTML = """<!DOCTYPE html>
           </tr>
         </thead>
         <tbody id="autotune-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="advisor-section" style="display:none">
+    <h2>Claude セカンドオピニオン的中率</h2>
+    <p class="chart-note">エントリー候補ごとにClaude(haiku)が承認/veto判断（記録のみ、advise_entryモード時はエントリー自体は通常通り実行）。直後のバーで実際に成立した取引の損益と突き合わせた的中率。regressionモード専用（claude_nativeでは動作しません）。</p>
+    <div class="tiles" id="advisor-tiles"></div>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr>
+            <th>日時 (JST)</th>
+            <th>判断</th>
+            <th>方向</th>
+            <th>根拠</th>
+            <th>結果</th>
+            <th>的中</th>
+          </tr>
+        </thead>
+        <tbody id="advisor-body"></tbody>
       </table>
     </div>
   </section>
@@ -1197,6 +1219,48 @@ _DASH_HTML = """<!DOCTYPE html>
       } catch (e) { /* 履歴が無くても他の表示は継続 */ }
     }
 
+    // ---- Claude セカンドオピニオン的中率 ----
+    async function loadAdvisorStats() {
+      try {
+        const res = await fetch("/api/advisor-stats").then(function (r) { return r.json(); });
+        const sec = document.getElementById("advisor-section");
+        if (!res.enabled) {
+          sec.style.display = "none";
+          return;
+        }
+        sec.style.display = "block";
+        const pct = function (v) { return v == null ? "—" : fmtNum(v * 100, 0) + "%"; };
+        const tiles = [
+          { k: "評価件数", v: res.n_evaluated, s: res.n_no_entry ? "見送り(未エントリー) " + res.n_no_entry + "件は対象外" : "" },
+          { k: "総合的中率", v: pct(res.hit_rate), s: "veto側のwin_rateが低いほど有効" },
+          { k: "承認時の勝率", v: pct(res.approve_win_rate), s: res.n_approve + "件" },
+          { k: "veto時の勝率", v: pct(res.veto_win_rate), s: res.n_veto + "件" },
+        ];
+        document.getElementById("advisor-tiles").innerHTML = tiles.map(function (t) {
+          return '<div class="tile"><div class="k">' + t.k + '</div><div class="v">' + t.v + '</div>' +
+            (t.s ? '<div class="s">' + t.s + "</div>" : "") + "</div>";
+        }).join("");
+
+        const rows = res.recent || [];
+        const tbody = document.getElementById("advisor-body");
+        if (!rows.length) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted)">まだ評価できる判断がありません</td></tr>';
+          return;
+        }
+        tbody.innerHTML = rows.map(function (r) {
+          const verdictPill = r.verdict === "veto"
+            ? '<span class="pill short">veto</span>'
+            : '<span class="pill flat">承認</span>';
+          const hitPill = r.hit
+            ? '<span class="pill long">的中</span>'
+            : '<span class="pill short">はずれ</span>';
+          return "<tr><td class='mono'>" + fmtJst(r.bar_open_time) + "</td><td>" + verdictPill + "</td>" +
+            "<td>" + sideLabel(r.side) + "</td><td>" + (r.advice_reason || r.signal_reason || "—") + "</td>" +
+            "<td class='mono'>" + pnlMoney(r.matched_pnl) + "</td><td>" + hitPill + "</td></tr>";
+        }).join("");
+      } catch (e) { /* 履歴が無くても他の表示は継続 */ }
+    }
+
     // ---- メイン読み込み ----
     async function load() {
       const st = document.getElementById("status");
@@ -1218,6 +1282,7 @@ _DASH_HTML = """<!DOCTYPE html>
         renderEquity(lastEquity);
         renderStatePanel(state);
         loadAutotune();
+        loadAdvisorStats();
         st.textContent = "最終更新: " + new Date().toLocaleTimeString("ja-JP") + " JST" +
           (jpy() ? "（1 USD = ¥" + fmtNum(fx.rate, 2) + "）" : "");
       } catch (e) {
@@ -2253,6 +2318,24 @@ def create_app(config_path: Path | None = None) -> Flask:
         hist_path = root / "data" / "auto_tune_history.jsonl"
         rows = _tail_jsonl(hist_path, max_lines=limit)
         return jsonify({"count": len(rows), "history": list(reversed(rows))})
+
+    @app.get("/api/advisor-stats")
+    def api_advisor_stats() -> Response:
+        """regressionモードのClaudeセカンドオピニオン(advisor)の的中率。
+
+        claude_advice.jsonl の各判断を、直後のバーで実際に成立した取引の
+        損益と突き合わせて評価する（advisor.enabled=false なら空扱い）。
+        """
+        adv_cfg = cfg.get("advisor") or {}
+        advice_path = root / str(adv_cfg.get("log_path", "data/claude_advice.jsonl"))
+        advice_records = _tail_jsonl(advice_path, max_lines=5000)
+        step_ms = INTERVAL_MS.get(interval, 15 * 60 * 1000)
+        trade_records = _tail_jsonl(log_path, max_lines=200_000)
+        trades, _ = _build_trades(trade_records)
+        result = _advisor_accuracy(advice_records, trades, step_ms)
+        result["enabled"] = bool(adv_cfg.get("enabled", False))
+        result["mode"] = str(adv_cfg.get("mode", "advise"))
+        return jsonify(result)
 
     @app.get("/api/aerodrome/events")
     def api_aerodrome_events() -> Response:

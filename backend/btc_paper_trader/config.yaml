@@ -54,7 +54,7 @@ filters:
   atr_low_quantile: 0.05
   atr_high_quantile: 0.97
   # 低ボラ時の手数料比較で落とされやすいためペーパーでは緩める
-  expectancy_gate: false
+  expectancy_gate: true
   taker_fee_rate: 0.0004
   slippage_bps: 2.0
   funding_filter_enabled: true

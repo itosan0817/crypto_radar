@@ -82,6 +82,67 @@ def build_trades(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], d
     return trades, open_tr
 
 
+def advisor_accuracy(
+    advice_records: list[dict[str, Any]],
+    trades: list[dict[str, Any]],
+    step_ms: int,
+    max_gap_bars: int = 3,
+) -> dict[str, Any]:
+    """Claudeセカンドオピニオン(advisor)の判断と実際の取引結果を突き合わせる。
+
+    各advice記録（advise_entry呼び出し時点＝pendingが立ったバー）に対し、
+    直後のバーで同方向にエントリーした取引を探し、その実現損益(partial込み)で
+    win/lossを判定する。一致する取引が無ければ（entry_timing_1m等でエントリー
+    自体が成立しなかった場合）評価対象から除外し no_entry として数える。
+
+    hit = (verdict=="approve" かつ win) または (verdict=="veto" かつ not win)
+    veto側のwin_rateが低いほど、Claudeの警告が実際のリスクを的中させていることになる。
+    """
+    closed = [t for t in trades if t.get("pnl") is not None and t.get("entry_time") is not None]
+
+    evaluated: list[dict[str, Any]] = []
+    no_entry = 0
+    for adv in advice_records:
+        bar_t = adv.get("bar_open_time")
+        side = adv.get("side")
+        verdict = str(adv.get("verdict", "approve")).lower()
+        if bar_t is None or side is None:
+            continue
+        lo = bar_t + step_ms
+        hi = bar_t + step_ms * max_gap_bars
+        candidates = [
+            t for t in closed
+            if t.get("side") == side and lo <= t["entry_time"] <= hi
+        ]
+        if not candidates:
+            no_entry += 1
+            continue
+        entry_time = min(t["entry_time"] for t in candidates)
+        total_pnl = sum(t["pnl"] for t in candidates if t["entry_time"] == entry_time)
+        win = total_pnl > 0
+        hit = (verdict == "veto" and not win) or (verdict != "veto" and win)
+        evaluated.append({**adv, "matched_pnl": total_pnl, "win": win, "hit": hit})
+
+    n = len(evaluated)
+    approved = [e for e in evaluated if e["verdict"].lower() != "veto"]
+    vetoed = [e for e in evaluated if e["verdict"].lower() == "veto"]
+    hits = sum(1 for e in evaluated if e["hit"])
+
+    def _win_rate(rows: list[dict[str, Any]]) -> float | None:
+        return (sum(1 for r in rows if r["win"]) / len(rows)) if rows else None
+
+    return {
+        "n_evaluated": n,
+        "n_no_entry": no_entry,
+        "hit_rate": (hits / n) if n else None,
+        "n_approve": len(approved),
+        "approve_win_rate": _win_rate(approved),
+        "n_veto": len(vetoed),
+        "veto_win_rate": _win_rate(vetoed),
+        "recent": sorted(evaluated, key=lambda e: e.get("bar_open_time") or 0, reverse=True)[:50],
+    }
+
+
 def period_stats(records: list[dict[str, Any]], since_ms: int, days: int) -> dict[str, Any]:
     """指定期間の成績サマリ（Claude へ渡す診断情報）"""
     trades, _ = build_trades(records)
